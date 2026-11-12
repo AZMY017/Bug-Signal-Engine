@@ -109,7 +109,7 @@ LEGEND = ("✅ = টেস্ট পিরিয়ডেও টিকেছে 
 
 def head_cmds():
     return ("/scan — এখনই স্ক্যান\n/bugs — পাওয়া বাগের তালিকা\n/csv — তালিকা CSV ফাইলে\n"
-            "/live — লাইভ অ্যালার্ট চালু/বন্ধ\n/status — অবস্থা\n/data — ডেটা কভারেজ\n/id — আমার Telegram ID")
+            "/check USDJPY 30 UP 12-24 — একটা নির্দিষ্ট স্লটের হিসাব\n/live — লাইভ অ্যালার্ট চালু/বন্ধ\n/status — অবস্থা\n/data — ডেটা কভারেজ\n/id — আমার Telegram ID")
 
 
 # ---------------------------------------------------------------- scan
@@ -129,6 +129,8 @@ async def do_scan(progress, min_wr=None, only=None):
         run_id = await asyncio.to_thread(rdb.new_run, json.dumps(dict(p, windows=WINDOWS)))
         plist = only or pairs.PAIRS
         rows_all, used, missing = [], [], []
+        near_all = []
+        p["near_out"] = near_all
         now = int(time.time())
         try:
             for i, pair in enumerate(plist):
@@ -140,6 +142,7 @@ async def do_scan(progress, min_wr=None, only=None):
                 rows = await asyncio.to_thread(engine.scan_pair, pair, ts, d, WINDOWS, p)
                 rows_all += rows
                 used.append((pairs.pretty(pair), len(ts), int(ts[0]), int(ts[-1])))
+            near_all.sort(key=lambda r: r["score"], reverse=True)
             rows_all.sort(key=lambda r: (r["robust"], r["score"]), reverse=True)
             rows_all = rows_all[:MAX_KEEP]
             await progress("💾 রেজাল্ট সেভ হচ্ছে…")
@@ -148,6 +151,7 @@ async def do_scan(progress, min_wr=None, only=None):
             n_rob = sum(1 for r in rows_all if r["robust"])
             note = json.dumps(dict(pairs=len(used), missing=missing, rows=len(rows_all), robust=n_rob,
                                    took=int(time.time() - t0), min_wr=p["min_wr"]))
+            p.pop("near_out", None)
             await asyncio.to_thread(rdb.finish_run, run_id, "done", note)
         except Exception as e:
             await asyncio.to_thread(rdb.finish_run, run_id, "failed", str(e)[:200])
@@ -164,7 +168,11 @@ async def do_scan(progress, min_wr=None, only=None):
     if rob:
         txt += "\nসেরা ৮টা:\n" + "\n".join(fmt_rule(i + 1, r) for i, r in enumerate(rob[:8])) + "\n\n" + LEGEND
     else:
-        txt += "\nএই শর্তে কোনো বাগ টেস্টে টেকেনি। /scan 75 লিখে WR কমিয়ে দেখতে পারো (কম WR = বেশি ভুয়া বাগের ঝুঁকি)।"
+        txt += "\nএই শর্তে কোনো বাগ টেস্টে টেকেনি।"
+        if near_all:
+            txt += (" সবচেয়ে কাছাকাছি ৬টা (পাস করেনি) দেখো:\n" +
+                    "\n".join(fmt_rule(i + 1, dict(r, robust=False)) for i, r in enumerate(engine.dedupe(near_all)[:6])) +
+                    "\n\n'কয়েন-ফ্লিপ' = শুধু ভাগ্যে যা আসত (MTG ছাড়া ৫০%%, MTG১ ৭৫%%, MTG২ ৮৭.৫%%)। কাছাকাছি তালিকার WR এর কাছাকাছি হলে ওটা বাগ না, শুধু ভাগ্য।")
     new_txt = ""
     if prev:
         fresh = [r for r in rob if "|".join(str(r[k]) for k in ("pair", "minute", "side", "mtg", "hs", "he", "nloss")) not in old_keys]
@@ -180,7 +188,7 @@ def parse_scan_args(args):
         for tok in a.replace(",", " ").split():
             try:
                 v = float(tok)
-                min_wr = v / 100.0 if v > 1 else v
+                min_wr = v / 100.0 if v >= 1 else v
             except ValueError:
                 p = pairs.norm(tok)
                 if p:
@@ -414,6 +422,44 @@ async def cmd_data(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await msg.edit_text("\n".join(L)[:4000])
 
 
+async def cmd_check(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """/check USDJPY 30 UP 12-24 : numbers of ONE slot (your known bug) over all stored days."""
+    if not allowed(update):
+        return await deny(update)
+    msg = update.effective_message
+    a = ctx.args or []
+    usage = "ব্যবহার: /check USDJPY 30 UP 12-24\n(পেয়ার, ঘণ্টার কত মিনিট, UP বা DOWN, সময়-উইন্ডো UTC+6; উইন্ডো না দিলে 0-24)"
+    try:
+        pair = pairs.norm(a[0])
+        minute = int(a[1])
+        side = {"UP": 1, "DOWN": -1}[a[2].upper()]
+        hs, he = (int(x) for x in (a[3] if len(a) > 3 else "0-24").split("-"))
+        assert pair and 0 <= minute < 60 and 0 <= hs < he <= 24
+    except Exception:  # noqa
+        return await msg.reply_text(usage)
+    if not source.enabled():
+        return await msg.reply_text("DATABASE_URL_* সেট করা নেই।")
+    wait = await msg.reply_text("⏳ ডেটা পড়ছি…")
+    try:
+        now = int(time.time())
+        ts, d = await asyncio.to_thread(source.load_dir, pair, now - SCAN_DAYS * 86400, now + 86400)
+        if len(ts) < 5000:
+            return await wait.edit_text("এই পেয়ারের ডেটা কম/নেই।")
+        res = await asyncio.to_thread(engine.check_slot, ts, d, side, minute, hs, he)
+    except Exception as e:  # noqa
+        return await wait.edit_text("❌ %s" % e)
+    L = ["%s | :%02d %s | %02d–%02d | %d দিনের মতো ডেটা" % (pairs.pretty(pair), minute, "UP" if side == 1 else "DOWN", hs, he,
+                                                      (ts[-1] - ts[0]) // 86400)]
+    for r in res:
+        L.append("")
+        L.append("%s: উইন রেট %s (%d/%d) • কয়েন-ফ্লিপ হতো %d%% • টেস্ট অংশে %s (%d)" % (
+            "No-MTG" if r["mtg"] == 0 else "MTG%d" % r["mtg"], pct(r["w"][0], r["n"][0]), r["w"][0], r["n"][0],
+            round(100 * r["base"]), pct(r["wte"], r["nte"]), r["nte"]))
+        L.append("   সর্বোচ্চ ব্যাক-টু-ব্যাক লস (একদিনে): %d" % r["maxl"])
+        L.append("   লসের পর ট্রেড: " + " • ".join("%d লস → %s (%d)" % (N, pct(r["w"][N], r["n"][N]), r["n"][N]) for N in (1, 2, 3)))
+    await wait.edit_text("\n".join(L)[:4000])
+
+
 async def cmd_id(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text("তোমার Telegram ID: %d" % update.effective_user.id)
 
@@ -459,7 +505,7 @@ async def post_init(app):
     global APP
     APP = app
     cmds = [BotCommand("scan", "এখনই বাগ স্ক্যান"), BotCommand("bugs", "পাওয়া বাগের তালিকা"), BotCommand("csv", "তালিকা CSV"),
-            BotCommand("live", "লাইভ অ্যালার্ট"), BotCommand("status", "অবস্থা"), BotCommand("data", "ডেটা কভারেজ"),
+            BotCommand("live", "লাইভ অ্যালার্ট"), BotCommand("status", "অবস্থা"), BotCommand("data", "ডেটা কভারেজ"), BotCommand("check", "একটা স্লটের হিসাব দেখো"),
             BotCommand("id", "আমার Telegram ID")]
     try:
         await app.bot.set_my_commands(cmds)
@@ -518,6 +564,7 @@ def main():
     app.add_handler(CommandHandler("live", cmd_live))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("data", cmd_data))
+    app.add_handler(CommandHandler("check", cmd_check))
     app.add_handler(CommandHandler("id", cmd_id))
     app.add_handler(CallbackQueryHandler(on_bugs_cb, pattern=r"^bg:"))
     app.add_handler(CallbackQueryHandler(on_live_cb, pattern=r"^lv:"))

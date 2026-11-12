@@ -85,13 +85,18 @@ def streak_pass(w, v, hs, he):
 
 
 def scan_pair(pair, ts, d, windows, p):
-    """p: dict(min_wr, min_edge, z, min_n, min_n_cond, min_test_n, min_test_n_cond, split). Returns list of row dicts."""
+    """p: dict(min_wr, min_edge, z, min_n, min_n_cond, min_test_n, min_test_n_cond, split).
+    Returns the list of row dicts that pass. If p["near_out"] is a list, the 5 closest misses of this pair are
+    appended to it too (so you can see what the scan found even when nothing passes)."""
     if len(ts) < 5000:
         return []
     _, dirm, val = build_matrices(ts, d)
     nd = dirm.shape[0]
     cut = max(1, int(nd * p["split"]))
     rows = []
+    near = []
+    near_out = p.get("near_out")
+    z = p.get("z", 3.5)
     for side, sname in ((1, "UP"), (-1, "DOWN")):
         for k in MTGS:
             W, V = outcome_cubes(dirm, val, side, k)
@@ -108,18 +113,47 @@ def scan_pair(pair, ts, d, windows, p):
                     for m in cand:
                         nn, ww = int(n[N, m]), int(w[N, m])
                         wr = ww / nn
-                        lb = wilson_lb(ww, nn, p.get("z", 3.0))
-                        if wr < p["min_wr"] or lb < base + p["min_edge"]:
+                        lb = wilson_lb(ww, nn, z)
+                        score = lb - base
+                        passes = wr >= p["min_wr"] and score >= p["min_edge"]
+                        track = near_out is not None and (len(near) < 5 or score > near[-1]["score"])
+                        if not passes and not track:
                             continue
                         a, b = int(nte[N, m]), int(wte[N, m])
                         need_t = p["min_test_n"] if N == 0 else p["min_test_n_cond"]
-                        robust = bool(a >= need_t and b / a >= p["min_wr"] - 0.05 and b / a >= base + 0.02
+                        robust = bool(passes and a >= need_t and b / a >= p["min_wr"] - 0.05 and b / a >= base + 0.02
                                       and int(wtr[N, m]) / max(1, int(ntr[N, m])) >= base + 0.02)
-                        rows.append(dict(pair=pair, minute=int(m), side=sname, mtg=k, hs=hs, he=he, nloss=N,
-                                         n=nn, w=ww, ntr=int(ntr[N, m]), wtr=int(wtr[N, m]), nte=a, wte=b,
-                                         maxl=int(mall[m]), maxl_tr=int(mtr[m]), maxl_te=int(mte[m]),
-                                         base=base, score=lb - base, robust=robust))
+                        row = dict(pair=pair, minute=int(m), side=sname, mtg=k, hs=hs, he=he, nloss=N,
+                                   n=nn, w=ww, ntr=int(ntr[N, m]), wtr=int(wtr[N, m]), nte=a, wte=b,
+                                   maxl=int(mall[m]), maxl_tr=int(mtr[m]), maxl_te=int(mte[m]),
+                                   base=base, score=score, robust=robust)
+                        if passes:
+                            rows.append(row)
+                        elif track:
+                            near.append(row)
+                            near.sort(key=lambda r: r["score"], reverse=True)
+                            del near[5:]
+    if near_out is not None:
+        near_out.extend(near)
     return rows
+
+
+def check_slot(ts, d, side, minute, hs, he):
+    """Plain numbers for one slot (for /check): for MTG 0/1/2 -> list of dicts with n, wins, max back-to-back loss,
+    and the 'after N losses' win rates, over all days and over the train/test halves."""
+    _, dirm, val = build_matrices(ts, d)
+    nd = dirm.shape[0]
+    cut = max(1, int(nd * 2 / 3))
+    out = []
+    for k in MTGS:
+        W, V = outcome_cubes(dirm, val, side, k)
+        ntr, wtr, mtr = streak_pass(W[:cut], V[:cut], hs, he)
+        nte, wte, mte = streak_pass(W[cut:], V[cut:], hs, he)
+        n, w = ntr + nte, wtr + wte
+        out.append(dict(mtg=k, base=base_rate(k), maxl=int(max(mtr[minute], mte[minute])),
+                        n=[int(n[N, minute]) for N in range(NMAX + 1)], w=[int(w[N, minute]) for N in range(NMAX + 1)],
+                        ntr=int(ntr[0, minute]), wtr=int(wtr[0, minute]), nte=int(nte[0, minute]), wte=int(wte[0, minute])))
+    return out
 
 
 def live_run(ts, d, side, k, minute, hs, hour):
