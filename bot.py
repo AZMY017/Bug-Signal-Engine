@@ -16,6 +16,7 @@ from telegram.error import BadRequest, RetryAfter
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
 import engine
+import engine2
 import live
 import oanda
 import pairs
@@ -109,7 +110,7 @@ LEGEND = ("✅ = টেস্ট পিরিয়ডেও টিকেছে 
 
 def head_cmds():
     return ("/scan — এখনই স্ক্যান\n/bugs — পাওয়া বাগের তালিকা\n/csv — তালিকা CSV ফাইলে\n"
-            "/check USDJPY 30 UP 12-24 — একটা নির্দিষ্ট স্লটের হিসাব\n/live — লাইভ অ্যালার্ট চালু/বন্ধ\n/status — অবস্থা\n/data — ডেটা কভারেজ\n/id — আমার Telegram ID")
+            "/check USDJPY 30 UP 12-24 — একটা নির্দিষ্ট স্লটের হিসাব\n/engine2 — নতুন ইঞ্জিন ২ (Back Signal Discovery)\n/live — লাইভ অ্যালার্ট চালু/বন্ধ\n/status — অবস্থা\n/data — ডেটা কভারেজ\n/id — আমার Telegram ID")
 
 
 # ---------------------------------------------------------------- scan
@@ -473,6 +474,181 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "আর আলাদা টেস্ট পিরিয়ডে যাচাই করে।\n\n" + head_cmds())
 
 
+# ---------------------------------------------------------------- /engine2  (Back Signal Discovery)
+E2 = dict(months=12, side="BOTH", mtg="BOTH", acc=0.80, nmin=300)
+E2_PAYOUT = _f("E2_PAYOUT", "0.85")      # broker payout, 0.85 = 85%
+E2_MULT = _f("E2_MTG_MULT", "2.2")        # stake multiplier of the MTG step (for the EV number)
+E2_Z = _f("E2_Z", "0")                    # 0 = automatic (Bonferroni, depends on how many slots are tested)
+E2_ICON = {"valid": "✅", "low": "🟡", "overfit": "❌", "no": "▫️"}
+E2_LEGEND = ("✅ = প্রথম অংশে খুঁজে পাওয়া, শেষ অংশে (OOS) আর প্রতি মাসে/তিন ভাগে টিকেছে • 🟡 = নমুনা কম, কম ভরসা • "
+             "❌ = ওভারফিট (শুধু আগের ডেটায় ভালো)\n"
+             "OOS = শেষ ১/৩ অংশ, যেটা বাগ খোঁজার সময় দেখা হয়নি। 'রিকভারি 2L' = ঠিক ২টা সিগন্যাল পরপর লসের পরের সিগন্যালের উইন রেট (সংখ্যা = কতবার ঘটেছে)। "
+             "EV = প্রথম স্টেকের ইউনিটে প্রতি সিগন্যালে গড় লাভ/লস (পেআউট %d%%, MTG গুণ %.1f ধরে)। সময় UTC+6 ফিক্সড।" % (round(E2_PAYOUT * 100), E2_MULT))
+
+
+def e2_text():
+    side = E2["side"]
+    mtg = {"NON": "No-MTG", "MTG1": "MTG1", "BOTH": "No-MTG + MTG1"}[E2["mtg"]]
+    return ("🔬 ইঞ্জিন ২ — Back Signal Discovery\n\n"
+            "সব ২০ পেয়ার × প্রতি ঘণ্টার ০–৫৯ মিনিট × UP/DOWN × MTG। প্রথম ২/৩ অংশে প্যাটার্ন খোঁজে, শেষ ১/৩ অংশে (OOS) যাচাই করে, "
+            "প্রতি মাসের স্থিতিশীলতা দেখে, ধারাবাহিক সিগন্যাল-লস (দিন ভাঙে না) গোনে।\n\n"
+            "⚙️ এখনকার সেটিং:\n• সময়কাল: %d মাস\n• দিক: %s\n• MTG: %s\n• ন্যূনতম অ্যাকুরেসি: %d%%\n• ন্যূনতম নমুনা (ট্রেইন অংশে): %d\n\n"
+            "নির্দিষ্ট পেয়ার চাইলে: /engine2 USDJPY EURJPY\nসেটিং বদলে ▶️ চালাও চাপো।" % (
+                E2["months"], side, mtg, round(E2["acc"] * 100), E2["nmin"]))
+
+
+def e2_kb():
+    def row(label, key, vals, fmt):
+        return [Btn(("✔ " if E2[key] == v else "") + fmt(v), callback_data="e2:%s:%s" % (key, v)) for v in vals]
+    rows = [row("m", "months", (3, 4, 6, 9, 12), lambda v: "%dM" % v),
+            row("s", "side", ("UP", "DOWN", "BOTH"), str),
+            row("g", "mtg", ("NON", "MTG1", "BOTH"), lambda v: {"NON": "No-MTG", "MTG1": "MTG1", "BOTH": "দুটোই"}[v]),
+            row("a", "acc", (0.6, 0.7, 0.8), lambda v: "%d%%" % round(v * 100)),
+            row("a", "acc", (0.85, 0.9, 0.95), lambda v: "%d%%" % round(v * 100)),
+            row("n", "nmin", (100, 300, 1000), lambda v: "নমুনা≥%d" % v),
+            [Btn("▶️ চালাও (সব পেয়ার)", callback_data="e2:run:0")]]
+    return Markup(rows)
+
+
+def fmt2(i, r):
+    mtg = "No-MTG" if r["mtg"] == 0 else "MTG%d" % r["mtg"]
+    rec = " ".join("%dL→%s(%d)" % (N + 1, pct(r["rec_w"][N], r["rec_n"][N]), r["rec_n"][N]) for N in range(4))
+    return ("%s%d. %s | :%02d %s | %s\n"
+            "    ট্রেইন %s (%d) • OOS %s (%d) • মোট %s (%d/%d)\n"
+            "    Normal %s • MTG-জয় %d • লস %d • ডোজি %d • সর্বোচ্চ লস %d\n"
+            "    রিকভারি: %s\n"
+            "    মাস %d/%d ভালো • EV %+.2f" % (
+                E2_ICON[r["status"]], i, pairs.pretty(r["pair"]), r["minute"], r["side"], mtg,
+                pct(r["wtr"], r["ntr"]), r["ntr"], pct(r["wte"], r["nte"]), r["nte"], pct(r["w"], r["n"]), r["w"], r["n"],
+                pct(r["nw"], r["n"]), r["mw"], r["loss"], r["doji"], r["maxl"], rec, r["months_ok"], r["months_tot"], r["ev"]))
+
+
+def e2_csv(rows, months):
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["status", "pair", "minute", "side", "mtg", "period_months", "total_signals", "normal_win", "mtg_win", "final_win",
+                "final_loss", "doji", "normal_acc_%", "final_acc_%", "coin_flip_%", "train_acc_%", "train_n", "oos_acc_%", "oos_n",
+                "max_consec_loss", "rec1_acc_%", "rec1_n", "rec2_acc_%", "rec2_n", "rec3_acc_%", "rec3_n", "rec4_acc_%", "rec4_n",
+                "rec5_acc_%", "rec5_n", "months_good", "months_total", "folds_ok", "EV_per_signal"])
+    P = lambda a, b: round(100.0 * a / b, 1) if b else ""   # noqa
+    for r in rows:
+        line = [r["status"], pairs.pretty(r["pair"]), r["minute"], r["side"], r["mtg"], months, r["n"], r["nw"], r["mw"], r["w"], r["loss"],
+                r["doji"], P(r["nw"], r["n"]), P(r["w"], r["n"]), round(100 * r["base"], 1), P(r["wtr"], r["ntr"]), r["ntr"],
+                P(r["wte"], r["nte"]), r["nte"], r["maxl"]]
+        for N in range(engine2.NREC):
+            line += [P(r["rec_w"][N], r["rec_n"][N]), r["rec_n"][N]]
+        line += [r["months_ok"], r["months_tot"], "yes" if r["fold_ok"] else "no", round(r["ev"], 3)]
+        w.writerow(line)
+    return io.BytesIO(buf.getvalue().encode("utf-8-sig"))
+
+
+async def do_engine2(progress, only=None):
+    """-> (text, csv BytesIO). Reads candles read-only, nothing is written to any database."""
+    if not source.enabled():
+        raise RuntimeError("DATABASE_URL_1/2/3 সেট করা নেই (লাইভ বটের ক্যান্ডেল ডেটাবেজ)।")
+    async with SCAN_LOCK:       # same lock as /scan: two heavy jobs at once would eat Render's small RAM
+        t0 = time.time()
+        plist = only or pairs.PAIRS
+        sides = ["UP", "DOWN"] if E2["side"] == "BOTH" else [E2["side"]]
+        mtgs = {"NON": [0], "MTG1": [1], "BOTH": [0, 1]}[E2["mtg"]]
+        n_tests = len(plist) * 60 * len(sides) * len(mtgs)
+        z = E2_Z or engine2.bonferroni_z(n_tests)
+        p = dict(min_acc=E2["acc"], min_n=E2["nmin"], min_test_n=max(30, E2["nmin"] // 3), z=z, split=PARAMS["split"],
+                 sides=sides, mtgs=mtgs, minutes=range(60), payout=E2_PAYOUT, mult=E2_MULT)
+        now = int(time.time())
+        allrows, quals, missing = [], [], []
+        for i, pair in enumerate(plist):
+            await progress("⏳ ইঞ্জিন ২: %d/%d • %s" % (i + 1, len(plist), pairs.pretty(pair)))
+            ts, d = await asyncio.to_thread(source.load_dir, pair, now - E2["months"] * 30 * 86400, now + 86400)
+            if len(ts) < 5000:
+                missing.append(pairs.pretty(pair))
+                continue
+            rows, q = await asyncio.to_thread(engine2.scan_pair, pair, ts, d, p)
+            allrows += rows
+            quals.append(q)
+    engine2.sort_rows(allrows)
+    cnt = {k: sum(1 for r in allrows if r["status"] == k) for k in ("valid", "low", "overfit", "no")}
+    valid = engine.dedupe([r for r in allrows if r["status"] == "valid"])
+    txt = "🔬 ইঞ্জিন ২ শেষ (%d সেকেন্ড)\n%d পেয়ার • %d মাসের ডেটা চাওয়া হয়েছে • %d টা স্লট পরীক্ষা (সব ৬০ মিনিট)\n" % (
+        int(time.time() - t0), len(quals), E2["months"], len(allrows))
+    if quals:
+        txt += "ডেটার মান: গড় কভারেজ %d%% (বাজার-খোলা দিনে) • ডোজি %.2f%% • গড় %d ট্রেডিং-দিন\n" % (
+            round(100 * sum(q["coverage"] for q in quals) / len(quals)), 100 * sum(q["doji"] for q in quals) / len(quals),
+            sum(q["days"] for q in quals) // len(quals))
+    if missing:
+        txt += "ডেটা নেই/কম: %s\n" % ", ".join(missing)
+    txt += ("কড়াকড়ি: z = %.2f (%d টা টেস্ট ধরে ভুয়া বাগ আটকাতে) • ন্যূনতম WR %d%% • নমুনা ≥ %d\n"
+            "✅ %d • 🟡 %d • ❌ ওভারফিট %d • বাকি (প্রার্থী না) %d\n" % (
+                z, n_tests, round(E2["acc"] * 100), E2["nmin"], cnt["valid"], cnt["low"], cnt["overfit"], cnt["no"]))
+    if valid:
+        txt += "\nসেরা ✅ বাগ (একই বাগের ভ্যারিয়েন্ট এক ধরে):\n" + "\n".join(fmt2(i + 1, r) for i, r in enumerate(valid[:8]))
+    else:
+        txt += "\nএই শর্তে কোনো ✅ বাগ নেই — এটা অস্বাভাবিক কিছু না, সত্যিকারের বাগ খুব বিরল।"
+        near = [r for r in allrows if r["status"] != "no"][:5] or allrows[:5]
+        if near:
+            txt += "\nসবচেয়ে কাছাকাছি ৫টা (বাগ না, শুধু কাছাকাছি):\n" + "\n".join(fmt2(i + 1, r) for i, r in enumerate(near))
+    txt += "\n\n" + E2_LEGEND
+    return txt, e2_csv(allrows, E2["months"])
+
+
+async def e2_job(chat_id, prog, only=None):
+    async def progress(t):
+        try:
+            await prog.edit_text(t)
+        except BadRequest:
+            pass
+    try:
+        txt, data = await do_engine2(progress, only)
+    except Exception as e:  # noqa
+        log.exception("engine2 failed")
+        return await progress("❌ ইঞ্জিন ২ হয়নি: %s" % e)
+    try:
+        await prog.delete()
+    except Exception:  # noqa
+        pass
+    for part in chunks(txt):
+        await send(chat_id, part)
+    data.name = "engine2_%s.csv" % dt.datetime.now(pairs.BDT).strftime("%Y%m%d_%H%M")
+    try:
+        await APP.bot.send_document(chat_id, data, caption="ইঞ্জিন ২: সব স্লটের পূর্ণ তালিকা (✅ আগে)")
+    except Exception:  # noqa
+        log.exception("engine2 csv send")
+
+
+async def cmd_engine2(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return await deny(update)
+    msg = update.effective_message
+    only = [p for p in (pairs.norm(t) for a in (ctx.args or []) for t in a.replace(",", " ").split()) if p]
+    if only:
+        if SCAN_LOCK.locked():
+            return await msg.reply_text("একটা স্ক্যান আগে থেকেই চলছে, শেষ হলে আবার চেষ্টা করো।")
+        prog = await msg.reply_text("⏳ ইঞ্জিন ২ শুরু…")
+        ctx.application.bot_data["e2_job"] = asyncio.create_task(e2_job(msg.chat_id, prog, only))
+        return
+    await msg.reply_text(e2_text(), reply_markup=e2_kb())
+
+
+async def on_e2_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    if not allowed(update):
+        return await q.answer("অনুমতি নেই", show_alert=True)
+    _, key, val = q.data.split(":")
+    if key == "run":
+        if SCAN_LOCK.locked():
+            return await q.answer("একটা স্ক্যান চলছে, শেষ হলে চাপো।", show_alert=True)
+        await q.answer("শুরু হচ্ছে…")
+        prog = await q.message.reply_text("⏳ ইঞ্জিন ২ শুরু…")
+        ctx.application.bot_data["e2_job"] = asyncio.create_task(e2_job(q.message.chat_id, prog))
+        return
+    await q.answer()
+    E2[key] = {"months": int, "nmin": int, "acc": float}.get(key, str)(val)
+    try:
+        await q.edit_message_text(e2_text(), reply_markup=e2_kb())
+    except BadRequest:
+        pass
+
+
 # ---------------------------------------------------------------- background
 async def auto_scan_loop(app):
     """Neon is read only when a scan is due (the next due time is kept in memory), so it can sleep in between."""
@@ -504,7 +680,7 @@ async def auto_scan_loop(app):
 async def post_init(app):
     global APP
     APP = app
-    cmds = [BotCommand("scan", "এখনই বাগ স্ক্যান"), BotCommand("bugs", "পাওয়া বাগের তালিকা"), BotCommand("csv", "তালিকা CSV"),
+    cmds = [BotCommand("scan", "এখনই বাগ স্ক্যান"), BotCommand("bugs", "পাওয়া বাগের তালিকা"), BotCommand("csv", "তালিকা CSV"), BotCommand("engine2", "ইঞ্জিন ২: Back Signal Discovery"),
             BotCommand("live", "লাইভ অ্যালার্ট"), BotCommand("status", "অবস্থা"), BotCommand("data", "ডেটা কভারেজ"), BotCommand("check", "একটা স্লটের হিসাব দেখো"),
             BotCommand("id", "আমার Telegram ID")]
     try:
@@ -565,9 +741,11 @@ def main():
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("data", cmd_data))
     app.add_handler(CommandHandler("check", cmd_check))
+    app.add_handler(CommandHandler("engine2", cmd_engine2))
     app.add_handler(CommandHandler("id", cmd_id))
     app.add_handler(CallbackQueryHandler(on_bugs_cb, pattern=r"^bg:"))
     app.add_handler(CallbackQueryHandler(on_live_cb, pattern=r"^lv:"))
+    app.add_handler(CallbackQueryHandler(on_e2_cb, pattern=r"^e2:"))
     app.run_polling(drop_pending_updates=True)
 
 
