@@ -23,6 +23,21 @@ import numpy as np
 OFF = 6 * 3600                 # UTC+6
 HOURS = list(range(12, 24))    # 12:00 .. 23:59 BDT
 PERIOD_DAYS = {1: 30, 2: 60, 3: 90, 6: 180, 12: 365}
+
+
+def period_days(months):
+    """Days for a period given in months (any number, e.g. 4, 5 or 1.5 for 45 days)."""
+    return PERIOD_DAYS.get(months) or max(1, int(round(months * 30)))
+
+
+def period_label_en(months):
+    d = period_days(months)
+    if d == 365:
+        return "1 year"
+    if d % 30 == 0 and d != 360:
+        m = d // 30
+        return "1 month" if m == 1 else "%d months" % m
+    return "%d days" % d
 WD = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
@@ -72,7 +87,7 @@ def pick_days(dirm, val, tf, months):
         if not has.any():
             return np.zeros(0, np.int64)
         last = int(np.flatnonzero(has)[-1])
-    first = max(0, last - PERIOD_DAYS[months] + 1)
+    first = max(0, last - period_days(months) + 1)
     idx = np.arange(first, last + 1)
     return idx[has[idx]]
 
@@ -305,7 +320,7 @@ def make_pdf(res, kmax=MAXK):
     dts = [day_date(res["d0"], i) for i in res["days"]]
     story.append(Paragraph(
         "Period: %s to %s  (%d trading days, last %s)   |   Entry hours 12:00-23:59 BDT (UTC+6)   |   Entry minutes: %s" % (
-            dts[0], dts[-1], len(dts), {1: "1 month", 2: "2 months", 3: "3 months", 6: "6 months", 12: "1 year"}[res["months"]],
+            dts[0], dts[-1], len(dts), period_label_en(res["months"]),
             ", ".join(":%02d" % m for m in res["minutes"])), p9))
     story.append(Paragraph(
         "<b>How to read:</b> GREEN block = you trade GREEN at that minute, RED block = you trade RED. The light-green block is the colour that appears more often at that minute. "

@@ -7,13 +7,14 @@ import io
 import json
 import logging
 import os
+import re
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 
 from telegram import BotCommand, InlineKeyboardButton as Btn, InlineKeyboardMarkup as Markup, Update
 from telegram.error import BadRequest, RetryAfter
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 import engine
 import engine2
@@ -651,10 +652,42 @@ async def on_e2_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ---------------------------------------------------------------- /engine3  (Minute Grid: G/R table + win ratio, PDF / CSV)
-E3 = dict(tf=1, months=1, out="PDF", mtg=3, pairs=[], minutes=[], page="main")
+E3 = dict(tf=1, months=3, out="PDF", mtg=3, pairs=[], minutes=[], page="main", wait=False)
 E3_MTG = {0: "নন-MTG", 1: "MTG1", 2: "MTG2", 3: "MTG3"}
 E3_MONTHS = {1: "1M", 2: "2M", 3: "3M", 6: "6M", 12: "1Y"}
 E3_OUT = {"PDF": "PDF", "CSV": "CSV", "BOTH": "দুটোই"}
+E3_PRESETS = (3, 4, 5, 6)          # /engine3 period buttons (+ ✏️ custom); /engine4 still uses E3_MONTHS
+E3_MAX_DAYS = 365
+
+
+def e3_label(months):
+    d = engine3.period_days(months)
+    if d == 365:
+        return "1Y"
+    if d % 30 == 0 and d != 360:
+        return "%dM" % (d // 30)
+    return "%d দিন" % d
+
+
+def e3_parse_period(txt):
+    """'4' / '4M' = months, '45D' / '45 দিন' = days, '1Y' = year  ->  months (number) or None."""
+    t = txt.strip().lower().replace(" ", "")
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)(d|day|days|দিন|m|mo|month|months|মাস|y|yr|year|years|বছর)?", t)
+    if not m:
+        return None
+    n, unit = float(m.group(1)), (m.group(2) or "m")
+    if unit.startswith(("d", "দ")):
+        days = n
+    elif unit.startswith(("y", "ব")):
+        days = n * 365
+    else:
+        days = n * 30
+    days = int(round(days))
+    if days < 1 or days > E3_MAX_DAYS:
+        return None
+    if days == 365:
+        return 12
+    return days // 30 if days % 30 == 0 else days / 30.0
 
 
 def e3_text():
@@ -664,7 +697,7 @@ def e3_text():
             "প্রতি ঘণ্টার (১২টা–২৩টা, UTC+6) বাছাই করা মিনিটের ক্যান্ডেল G/R টেবিলে সাজায়, নন-MTG ও MTG1 উইনিং রেশিও এবং ব্যাক-টু-ব্যাক লস বের করে।\n\n"
             "⚙️ এখনকার সেটিং:\n• টাইম ফ্রেম: %d মিনিট\n• সময়কাল: %s\n• আউটপুট: %s\n• MTG: %s পর্যন্ত\n• পেয়ার: %s\n• মিনিট: %s\n\n"
             "পেয়ার ও মিনিট বাছাই করে ▶️ চালাও চাপো। (/engine3 USDJPY EURJPY লিখলে পেয়ার আগে থেকেই বাছা হবে)" % (
-                E3["tf"], E3_MONTHS[E3["months"]], E3_OUT[E3["out"]], E3_MTG[E3["mtg"]], ps, ms))
+                E3["tf"], e3_label(E3["months"]), E3_OUT[E3["out"]], E3_MTG[E3["mtg"]], ps, ms))
 
 
 def e3_kb():
@@ -694,7 +727,8 @@ def e3_kb():
         return Markup(rows)
     return Markup([
         [Btn(tick(E3["tf"] == v, "%d মিনিট" % v), callback_data="e3:tf:%d" % v) for v in (1, 3, 5)],
-        [Btn(tick(E3["months"] == v, lb), callback_data="e3:mo:%d" % v) for v, lb in E3_MONTHS.items()],
+        [Btn(tick(E3["months"] == v, "%dM" % v), callback_data="e3:mo:%d" % v) for v in E3_PRESETS]
+        + [Btn(tick(E3["months"] not in E3_PRESETS, "✏️ " + e3_label(E3["months"]) if E3["months"] not in E3_PRESETS else "✏️"), callback_data="e3:mo:custom")],
         [Btn(tick(E3["mtg"] == v, lb), callback_data="e3:mtg:%d" % v) for v, lb in E3_MTG.items()],
         [Btn(tick(E3["out"] == v, lb), callback_data="e3:out:%s" % v) for v, lb in E3_OUT.items()],
         [Btn("💱 পেয়ার (%d)" % len(E3["pairs"]), callback_data="e3:pg:pairs"), Btn("⏱ মিনিট (%d)" % len(E3["minutes"]), callback_data="e3:pg:minutes")],
@@ -709,7 +743,7 @@ async def e3_job(chat_id, prog, st):
             pass
     if not source.enabled():
         return await progress("❌ DATABASE_URL_1/2/3 সেট করা নেই (লাইভ বটের ক্যান্ডেল ডেটাবেজ)।")
-    days = engine3.PERIOD_DAYS[st["months"]]
+    days = engine3.period_days(st["months"])
     stamp = dt.datetime.now(pairs.BDT).strftime("%Y%m%d_%H%M")
     missing = []
     try:
@@ -724,7 +758,7 @@ async def e3_job(chat_id, prog, st):
                     continue
                 tag = "%s_M%d_%s" % (pair, st["tf"], stamp)
                 head = "📊 %s • %d মিনিট • %s • %d ট্রেডিং-দিন (%s → %s)" % (
-                    pairs.pretty(pair), st["tf"], E3_MONTHS[st["months"]], len(res["days"]),
+                    pairs.pretty(pair), st["tf"], e3_label(st["months"]), len(res["days"]),
                     engine3.day_date(res["d0"], res["days"][0]), engine3.day_date(res["d0"], res["days"][-1]))
                 if st["out"] in ("PDF", "BOTH"):
                     await progress("⏳ PDF বানাচ্ছি: %s" % pairs.pretty(pair))
@@ -754,6 +788,20 @@ async def cmd_engine3(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if only:
         E3["pairs"] = list(dict.fromkeys(only))
     E3["page"] = "main"
+    E3["wait"] = False
+    await update.effective_message.reply_text(e3_text(), reply_markup=e3_kb())
+
+
+async def on_e3_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Reply to the ✏️ custom-period prompt of /engine3 (ignored when nothing is awaited)."""
+    if not E3["wait"] or not allowed(update):
+        return
+    months = e3_parse_period(update.effective_message.text or "")
+    if months is None:
+        return await update.effective_message.reply_text("বুঝিনি। এভাবে লেখো: 7 / 7M / 45D / 1Y (১–%d দিনের মধ্যে)" % E3_MAX_DAYS)
+    E3["months"] = months
+    E3["wait"] = False
+    E3["page"] = "main"
     await update.effective_message.reply_text(e3_text(), reply_markup=e3_kb())
 
 
@@ -779,6 +827,12 @@ async def on_e3_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         E3["tf"] = int(val)
         E3["minutes"] = [m for m in E3["minutes"] if m % E3["tf"] == 0]
     elif key == "mo":
+        if val == "custom":
+            E3["wait"] = True
+            await q.message.reply_text(
+                "✏️ কত দিনের ব্যাক-টেস্ট চাও লেখো:\n• মাস: 7 অথবা 7M\n• দিন: 45D\n• বছর: 1Y\n(সর্বোচ্চ %d দিন)" % E3_MAX_DAYS)
+            return
+        E3["wait"] = False
         E3["months"] = int(val)
     elif key == "out":
         E3["out"] = val
@@ -1073,6 +1127,7 @@ def main():
     app.add_handler(CommandHandler("id", cmd_id))
     app.add_handler(CallbackQueryHandler(on_live_cb, pattern=r"^lv:"))
     app.add_handler(CallbackQueryHandler(on_e3_cb, pattern=r"^e3:"))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_e3_text))
     app.add_handler(CallbackQueryHandler(on_e4_cb, pattern=r"^e4:"))
     app.run_polling(drop_pending_updates=True)
 
