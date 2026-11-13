@@ -1050,7 +1050,7 @@ async def on_e5_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ---------------------------------------------------------------- /engine6  (Ranked Minute Charts: like engine3, but GREEN / RED charts per mode ranked by lowest one-day B2B loss)
-E6 = dict(tf=1, months=3, out="PDF", mtg=3, pairs=[], minutes=[], page="main", wait=False)
+E6 = dict(tf=1, months=3, out="PDF", mtg=[0], pairs=[], minutes=[], page="main", wait=False)
 
 
 def e6_text():
@@ -1058,9 +1058,9 @@ def e6_text():
     ms = " ".join(":%02d" % m for m in sorted(E6["minutes"])) or "— (বাছাই করোনি)"
     return ("🧮 ইঞ্জিন ৬ — র‍্যাংকড মিনিট চার্ট\n\n"
             "ইঞ্জিন ৩-এর মতোই চলে, শুধু PDF আলাদা: মিনিট টাইম-সিরিয়ালে নয়। প্রতি মোডে (নন-MTG, MTG1, MTG2, MTG3) আগে গ্রিন চার্ট, তারপর রেড চার্ট, আর একদিনের ব্যাক-টু-ব্যাক লস যে মিনিটে সবচেয়ে কম সেটা সবার আগে।\n\n"
-            "⚙️ এখনকার সেটিং:\n• টাইম ফ্রেম: %d মিনিট\n• সময়কাল: %s\n• আউটপুট: %s\n• MTG: %s পর্যন্ত\n• পেয়ার: %s\n• মিনিট: %s\n\n"
+            "⚙️ এখনকার সেটিং:\n• টাইম ফ্রেম: %d মিনিট\n• সময়কাল: %s\n• আউটপুট: %s\n• MTG (যেগুলো বাছা): %s\n• পেয়ার: %s\n• মিনিট: %s\n\n"
             "পেয়ার ও মিনিট বাছাই করে ▶️ চালাও চাপো। (/engine6 USDJPY EURJPY লিখলে পেয়ার আগে থেকেই বাছা হবে)" % (
-                E6["tf"], e3_label(E6["months"]), E3_OUT[E6["out"]], E3_MTG[E6["mtg"]], ps, ms))
+                E6["tf"], e3_label(E6["months"]), E3_OUT[E6["out"]], (" + ".join(E3_MTG[v] for v in sorted(E6["mtg"])) or "— (বাছাই করোনি)"), ps, ms))
 
 
 def e6_kb():
@@ -1092,7 +1092,7 @@ def e6_kb():
         [Btn(tick(E6["tf"] == v, "%d মিনিট" % v), callback_data="e6:tf:%d" % v) for v in (1, 3, 5)],
         [Btn(tick(E6["months"] == v, "%dM" % v), callback_data="e6:mo:%d" % v) for v in E3_PRESETS]
         + [Btn(tick(E6["months"] not in E3_PRESETS, "✏️ " + e3_label(E6["months"]) if E6["months"] not in E3_PRESETS else "✏️"), callback_data="e6:mo:custom")],
-        [Btn(tick(E6["mtg"] == v, lb), callback_data="e6:mtg:%d" % v) for v, lb in E3_MTG.items()],
+        [Btn(tick(v in E6["mtg"], lb), callback_data="e6:mtg:%d" % v) for v, lb in E3_MTG.items()],
         [Btn(tick(E6["out"] == v, lb), callback_data="e6:out:%s" % v) for v, lb in E3_OUT.items()],
         [Btn("💱 পেয়ার (%d)" % len(E6["pairs"]), callback_data="e6:pg:pairs"), Btn("⏱ মিনিট (%d)" % len(E6["minutes"]), callback_data="e6:pg:minutes")],
         [Btn("▶️ চালাও", callback_data="e6:run:0")]])
@@ -1165,11 +1165,13 @@ async def on_e6_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if key == "run":
         if not E6["pairs"] or not E6["minutes"]:
             return await q.answer("আগে অন্তত একটা পেয়ার আর একটা মিনিট বাছো", show_alert=True)
+        if not E6["mtg"]:
+            return await q.answer("অন্তত একটা MTG অপশন বাছো (নন-MTG / MTG1 / MTG2 / MTG3)", show_alert=True)
         if SCAN_LOCK.locked():
             return await q.answer("একটা স্ক্যান চলছে, শেষ হলে চাপো।", show_alert=True)
         await q.answer("শুরু হচ্ছে…")
         prog = await q.message.reply_text("⏳ ইঞ্জিন ৬ শুরু…")
-        st = dict(E3, pairs=list(E6["pairs"]), minutes=sorted(E6["minutes"]))
+        st = dict(E6, pairs=list(E6["pairs"]), minutes=sorted(E6["minutes"]), mtg=sorted(E6["mtg"]))
         ctx.application.bot_data["e6_job"] = asyncio.create_task(e6_job(q.message.chat_id, prog, st))
         return
     await q.answer()
@@ -1191,7 +1193,8 @@ async def on_e6_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif key == "out":
         E6["out"] = val
     elif key == "mtg":
-        E6["mtg"] = int(val)
+        v = int(val)
+        E6["mtg"] = [x for x in E6["mtg"] if x != v] if v in E6["mtg"] else sorted(E6["mtg"] + [v])
     elif key == "tp":
         E6["pairs"] = [p for p in E6["pairs"] if p != val] if val in E6["pairs"] else E6["pairs"] + [val]
     elif key == "pall":

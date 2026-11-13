@@ -55,15 +55,16 @@ def best_line(rows, limit=12):
 
 
 # ------------------------------------------------------------------ CSV
-def make_csv(res, kmax=MAXK):
+def make_csv(res, levels=None):
     """-> (grid_csv bytes, ranked_summary_csv bytes). Grid is the same as Engine 3; the summary is ranked."""
-    grid, _ = e3.make_csv(res, kmax)
+    levels = sorted(set(range(MAXK + 1) if levels is None else levels))
+    grid, _ = e3.make_csv(res, max(levels))
     s = io.StringIO()
     w = csv.writer(s)
     w.writerow(["pair", "tf_min", "mode", "trade", "rank", "minute", "days", "green", "red", "doji", "win", "loss",
                 "winrate_pct", "win_direct", "win_mtg1", "win_mtg2", "win_mtg3", "step_skipped", "b2b_loss_day",
                 "b2b_loss_chain", "b2b_loss_day_when", "b2b_loss_chain_when"])
-    for k in range(kmax + 1):
+    for k in levels:
         for side in ("G", "R"):
             for r in ranked(res, k, side):
                 lv = r["levels"] + [""] * (MAXK + 1 - len(r["levels"]))
@@ -75,7 +76,8 @@ def make_csv(res, kmax=MAXK):
 
 
 # ------------------------------------------------------------------ PDF
-def make_pdf(res, kmax=MAXK):
+def make_pdf(res, levels=None):
+    levels = sorted(set(range(MAXK + 1) if levels is None else levels))
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import ParagraphStyle
@@ -208,7 +210,7 @@ def make_pdf(res, kmax=MAXK):
                           hg if side == "G" else hr)
         return [KeepTogether([title, Paragraph(best_line(rows), pb)]), t]
 
-    for k in range(kmax + 1):
+    for k in levels:
         story.append(PageBreak())
         story.append(Paragraph("%s  -  %s  -  ranked by smallest back-to-back loss in one day" % (pair, MODES[k]), h2))
         story.extend(chart(k, "G"))
