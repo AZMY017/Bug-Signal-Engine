@@ -7,8 +7,8 @@ What it does (one pair, one timeframe, last N days, chosen minute slots):
  * For a chosen minute (e.g. :00) the entry candle is that minute of every hour (12:00, 13:00 ... 23:00) of every day.
    Win for a side (G = trade green, R = trade red):
      No-MTG : entry candle goes that way.
-     MTG1   : entry candle goes that way (direct win) OR the entry candle goes the other way and the NEXT candle goes
-              that way (MTG win). Entry wrong + next wrong = loss.
+     MTG k  : entry goes that way (direct win), OR the entry and the next candles go the other way and candle k+1 (k = 1..3)
+              goes that way: MTG1 = 2nd candle wins, MTG2 = 3rd candle, MTG3 = 4th candle. All k+1 candles wrong = loss.
  * Doji is shown as D, is never a loss: an entry that is a doji, or an MTG step that lands on a doji / missing candle,
    is skipped (counted separately, neither win nor loss, does not break a loss streak).
  * Back-to-back loss = consecutive losses in hour order (12, 13 ... 23). Reported two ways:
@@ -116,41 +116,58 @@ def _streaks(out, days=None, d0=0):
     return best_d, where_d, best_c, where_c
 
 
-def _pack(out, direct, mtg_w, days=None, d0=0):
+MAXK = 3
+MODES = ["No-MTG", "MTG1", "MTG2", "MTG3"]
+
+
+def _pack(out, levels, skipped, days=None, d0=0):
     w = int((out == 1).sum())
     lo = int((out == -1).sum())
     n = w + lo
     bd, wd, bc, wc = _streaks(out, days, d0)
-    return dict(win=w, loss=lo, n=n, wr=(w / n if n else 0.0), direct=direct, mtg=mtg_w,
+    return dict(win=w, loss=lo, n=n, wr=(w / n if n else 0.0), levels=levels, skipped=skipped,
                 b2b_day=bd, b2b_day_at=wd, b2b_chain=bc, b2b_chain_at=wc)
 
 
 def minute_stats(dirm, val, tf, minute, days, d0=0):
-    """Statistics of the entry slot `minute` (0..59, multiple of tf) over the chosen days."""
+    """Statistics of the entry slot `minute` (0..59, multiple of tf) over the chosen days, for No-MTG and MTG1..MTG3.
+    sides[G|R]['m'][k] = pack for MTG k (k = 0 means no MTG)."""
     per = 60 // tf
     S = 1440 // tf
     j = minute // tf
-    fd = np.concatenate((dirm.reshape(-1), [0])).astype(np.int8)
-    fv = np.concatenate((val.reshape(-1), [False]))
+    fd = np.concatenate((dirm.reshape(-1), np.zeros(MAXK, np.int8))).astype(np.int8)
+    fv = np.concatenate((val.reshape(-1), np.zeros(MAXK, bool)))
     idx = days[:, None] * S + np.array([h * per + j for h in HOURS])[None, :]
-    e, ev, nx, nv = fd[idx], fv[idx], fd[idx + 1], fv[idx + 1]
+    e, ev = fd[idx], fv[idx]
     g = int((ev & (e == 1)).sum())
     r = int((ev & (e == -1)).sum())
     dj = int((ev & (e == 0)).sum())
     res = dict(minute=minute, days=len(days), g=g, r=r, doji=dj, sides={})
     for name, s in (("G", 1), ("R", -1)):
-        non = np.zeros(e.shape, np.int8)
-        non[ev & (e == s)] = 1
-        non[ev & (e == -s)] = -1
         direct = ev & (e == s)
-        mwin = ev & (e == -s) & nv & (nx == s)
-        mloss = ev & (e == -s) & nv & (nx == -s)
-        mt = np.zeros(e.shape, np.int8)
-        mt[direct | mwin] = 1
-        mt[mloss] = -1
-        skipped = int((ev & (e == -s) & ~(mwin | mloss)).sum())
-        res["sides"][name] = dict(non=_pack(non, int(direct.sum()), 0, days, d0),
-                                  mtg=_pack(mt, int(direct.sum()), int(mwin.sum()), days, d0), mtg_skipped=skipped)
+        alive = ev & (e == -s)                 # entry wrong, still undecided
+        win_lv = [direct]                      # win at level 0..k
+        alive_after = [alive]                  # still wrong after step k  (-> loss for MTG k)
+        skip_at = [np.zeros(e.shape, bool)]    # undecidable at step k (doji / missing candle)
+        for step in range(1, MAXK + 1):
+            x, xv = fd[idx + step], fv[idx + step]
+            win_lv.append(alive & xv & (x == s))
+            skip_at.append(alive & ~(xv & (x != 0)))
+            alive = alive & xv & (x == -s)
+            alive_after.append(alive)
+        modes = {}
+        for k in range(MAXK + 1):
+            wins = np.zeros(e.shape, bool)
+            for lv in range(k + 1):
+                wins |= win_lv[lv]
+            skipped = np.zeros(e.shape, bool)
+            for st_ in range(1, k + 1):
+                skipped |= skip_at[st_]
+            out = np.zeros(e.shape, np.int8)
+            out[wins] = 1
+            out[alive_after[k]] = -1
+            modes[k] = _pack(out, [int(win_lv[lv].sum()) for lv in range(k + 1)], int(skipped.sum()), days, d0)
+        res["sides"][name] = dict(m=modes)
     res["dominant"] = "G" if g >= r else "R"
     return res
 
@@ -166,12 +183,9 @@ def analyze(pair, ts, o, c, tf, months, minutes):
     days = pick_days(dirm, val, tf, months)
     if len(days) == 0:
         return None
-    return dict(pair=pair, tf=tf, months=months, d0=d0, dirm=dirm, val=val, days=days,
-                minutes=sorted(minutes), stats=[minute_stats(dirm, val, tf, m, days, d0) for m in minutes_sorted(minutes)])
-
-
-def minutes_sorted(minutes):
-    return sorted(minutes)
+    mins = sorted(minutes)
+    return dict(pair=pair, tf=tf, months=months, d0=d0, dirm=dirm, val=val, days=days, minutes=mins,
+                stats=[minute_stats(dirm, val, tf, m, days, d0) for m in mins])
 
 
 def day_date(d0, i):
@@ -185,7 +199,7 @@ def _letter(dv, vv):
 
 def make_csv(res):
     """-> (grid_csv bytes, summary_csv bytes). Grid: one row per day+hour, one column per minute slot."""
-    tf, per, S = res["tf"], 60 // res["tf"], 1440 // res["tf"]
+    tf, per = res["tf"], 60 // res["tf"]
     g = io.StringIO()
     w = csv.writer(g)
     w.writerow(["date", "weekday", "hour"] + ["%02d" % (k * tf) for k in range(per)])
@@ -197,16 +211,16 @@ def make_csv(res):
     s = io.StringIO()
     w = csv.writer(s)
     w.writerow(["pair", "tf_min", "minute", "days", "green", "red", "doji", "side", "mode", "win", "loss", "winrate_pct",
-                "direct_win", "mtg_win", "mtg_step_skipped", "b2b_loss_day", "b2b_loss_day_when", "b2b_loss_chain", "b2b_loss_chain_when"])
+                "win_direct", "win_mtg1", "win_mtg2", "win_mtg3", "step_skipped", "b2b_loss_day", "b2b_loss_day_when",
+                "b2b_loss_chain", "b2b_loss_chain_when"])
     for st in res["stats"]:
         for side in ("G", "R"):
-            sd = st["sides"][side]
-            for mode, key in (("No-MTG", "non"), ("MTG1", "mtg")):
-                x = sd[key]
+            for k in range(MAXK + 1):
+                x = st["sides"][side]["m"][k]
+                lv = x["levels"] + [""] * (MAXK + 1 - len(x["levels"]))
                 w.writerow([res["pair"], tf, "%02d" % st["minute"], st["days"], st["g"], st["r"], st["doji"],
-                            "GREEN" if side == "G" else "RED", mode, x["win"], x["loss"], "%.1f" % (100 * x["wr"]),
-                            x["direct"] if key == "mtg" else "", x["mtg"] if key == "mtg" else "",
-                            sd["mtg_skipped"] if key == "mtg" else "", x["b2b_day"], x["b2b_day_at"], x["b2b_chain"], x["b2b_chain_at"]])
+                            "GREEN" if side == "G" else "RED", MODES[k], x["win"], x["loss"], "%.1f" % (100 * x["wr"]),
+                            lv[0], lv[1], lv[2], lv[3], x["skipped"], x["b2b_day"], x["b2b_day_at"], x["b2b_chain"], x["b2b_chain_at"]])
     return g.getvalue().encode("utf-8-sig"), s.getvalue().encode("utf-8-sig")
 
 
@@ -215,13 +229,14 @@ def make_pdf(res):
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import ParagraphStyle
-    from reportlab.platypus import Flowable, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    from reportlab.platypus import Flowable, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
     tf, per = res["tf"], 60 // res["tf"]
     sel = set(m // tf for m in res["minutes"])
     pair = res["pair"].replace("_", "/")
     GREEN, RED, GREY = colors.Color(0.0, 0.5, 0.25), colors.Color(0.8, 0.15, 0.2), colors.Color(0.45, 0.45, 0.5)
-    NAVY, LIGHT, ZEBRA, SELC = colors.Color(0.09, 0.22, 0.4), colors.Color(0.86, 0.91, 0.96), colors.Color(0.94, 0.96, 0.98), colors.Color(1, 0.93, 0.6)
+    NAVY, LIGHT, ZEBRA = colors.Color(0.09, 0.22, 0.4), colors.Color(0.86, 0.91, 0.96), colors.Color(0.94, 0.96, 0.98)
+    LINE = colors.Color(0.8, 0.84, 0.9)
     page = landscape(A4)
     M = 20
     width = page[0] - 2 * M
@@ -279,56 +294,66 @@ def make_pdf(res):
                     cv.drawCentredString(self.LW + k * cw + cw / 2, y + 2.4, "G" if v == 1 else "R" if v == -1 else "D")
 
     h1 = ParagraphStyle("h1", fontName="Helvetica-Bold", fontSize=15, textColor=NAVY, spaceAfter=4)
+    h2 = ParagraphStyle("h2", fontName="Helvetica-Bold", fontSize=10.5, textColor=NAVY, spaceBefore=6, spaceAfter=3)
     p9 = ParagraphStyle("p9", fontName="Helvetica", fontSize=8.5, leading=11)
-    pc = ParagraphStyle("pc", fontName="Helvetica", fontSize=6.3, leading=7.4, alignment=1)
+    pc = ParagraphStyle("pc", fontName="Helvetica", fontSize=6.6, leading=7.8, alignment=0)
 
-    def b2b_cell(x):
-        return Paragraph("<b>%d / %d</b><br/>day: %s<br/>chain: %s" % (
-            x["b2b_day"], x["b2b_chain"], x["b2b_day_at"] or "-", x["b2b_chain_at"] or "-"), pc)
+    def when(x, key):
+        return Paragraph(x[key] or "-", pc)
+
     story = [Paragraph("%s  -  Engine 3 Minute Grid  (M%d)" % (pair, tf), h1)]
     dts = [day_date(res["d0"], i) for i in res["days"]]
     story.append(Paragraph(
-        "Period: %s to %s  (%d trading days, last %s)   |   Entry hours 12:00-23:%02d BDT (UTC+6)   |   Entry minutes: %s" % (
+        "Period: %s to %s  (%d trading days, last %s)   |   Entry hours 12:00-23:59 BDT (UTC+6)   |   Entry minutes: %s" % (
             dts[0], dts[-1], len(dts), {1: "1 month", 2: "2 months", 3: "3 months", 6: "6 months", 12: "1 year"}[res["months"]],
-            59, ", ".join(":%02d" % m for m in res["minutes"])), p9))
-    story.append(Spacer(1, 6))
-    head = ["Min", "Days", "G", "R", "Doji", "Trade", "NoMTG\nWin", "NoMTG\nLoss", "NoMTG\nWR%", "NoMTG\nB2B day/chain",
-            "MTG1\nWin", "(direct\n+ MTG)", "MTG1\nLoss", "MTG1\nWR%", "MTG1\nB2B day/chain"]
-    rows = [head]
-    style = [("BACKGROUND", (0, 0), (-1, 0), NAVY), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, 0), 7),
-             ("FONTSIZE", (0, 1), (-1, -1), 8), ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-             ("ALIGN", (0, 0), (-1, -1), "CENTER"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-             ("GRID", (0, 0), (-1, -1), 0.4, colors.Color(0.8, 0.84, 0.9))]
-    for st in res["stats"]:
-        for side in ("G", "R"):
-            sd = st["sides"][side]
-            a, b = sd["non"], sd["mtg"]
-            r = len(rows)
-            first = side == "G"
-            rows.append([":%02d" % st["minute"] if first else "", st["days"] if first else "", st["g"] if first else "",
-                         st["r"] if first else "", st["doji"] if first else "",
-                         "GREEN" if side == "G" else "RED", a["win"], a["loss"], "%.1f" % (100 * a["wr"]),
-                         b2b_cell(a), b["win"], "%d + %d" % (b["direct"], b["mtg"]),
-                         b["loss"], "%.1f" % (100 * b["wr"]), b2b_cell(b)])
-            style.append(("TEXTCOLOR", (5, r), (5, r), GREEN if side == "G" else RED))
-            style.append(("FONTNAME", (5, r), (5, r), "Helvetica-Bold"))
-            if side == st["dominant"]:
-                style.append(("BACKGROUND", (0, r), (-1, r), colors.Color(0.93, 0.97, 0.9)))
-            if first:
-                style.append(("LINEABOVE", (0, r), (-1, r), 0.9, NAVY))
-    t = Table(rows, repeatRows=1, colWidths=[28, 28, 28, 28, 28, 40, 36, 36, 40, 112, 36, 50, 36, 40, 112])
-    t.setStyle(TableStyle(style))
-    story.append(t)
-    story.append(Spacer(1, 6))
+            ", ".join(":%02d" % m for m in res["minutes"])), p9))
     story.append(Paragraph(
-        "<b>How to read:</b> Green rows = trade GREEN at that minute, red rows = trade RED. Light-green row = the colour that appears more often at that minute. "
-        "No-MTG win = the entry candle goes your way. MTG1 win = entry goes your way, OR entry goes the other way and the next candle goes your way. "
+        "<b>How to read:</b> GREEN block = you trade GREEN at that minute, RED block = you trade RED. The light-green block is the colour that appears more often at that minute. "
+        "<b>No-MTG</b> win = the entry candle goes your way. <b>MTG1</b> = the 2nd candle may win it, <b>MTG2</b> = the 3rd candle, <b>MTG3</b> = the 4th candle "
+        "(every earlier candle went the wrong way). Loss = all candles of that mode went the wrong way. "
+        "Win breakdown = how many wins came directly, then from MTG step 1, 2, 3. "
         "Doji (open = close) is shown as D and is never a loss: a doji entry, or an MTG step landing on a doji, is skipped (not counted). "
-        "B2B = longest run of back-to-back losses in hour order: 'day' (restarts every day) / 'chain' (continues across days); under the numbers: WHEN it happened (first time, BDT date and hour). "
-        "Daily tables below: orange header = your selected minute(s).", p9))
-    story.append(Spacer(1, 8))
-    for n, i in enumerate(res["days"]):
+        "B2B = longest run of back-to-back losses in hour order: day (restarts every day) / chain (continues across days); the two right columns say WHEN it first happened (BDT date and hour). "
+        "Daily tables at the end: orange header = your selected minute(s).", p9))
+    story.append(Spacer(1, 4))
+    head = ["Trade", "Mode", "Win", "Win breakdown (direct + MTG steps)", "Loss", "WR %", "B2B\nday / chain",
+            "Longest loss run - day (when)", "Longest loss run - chain (when)"]
+    cw_ = [40, 46, 36, 150, 36, 40, 50, 204, 200]
+    for st in res["stats"]:
+        tot = st["g"] + st["r"]
+        gp = 100.0 * st["g"] / tot if tot else 0.0
+        rows = [head]
+        style = [("BACKGROUND", (0, 0), (-1, 0), NAVY), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                 ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, 0), 7),
+                 ("FONTSIZE", (0, 1), (-1, -1), 7.6), ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+                 ("ALIGN", (0, 0), (6, -1), "CENTER"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                 ("GRID", (0, 0), (-1, -1), 0.4, LINE), ("TOPPADDING", (0, 1), (-1, -1), 1.5),
+                 ("BOTTOMPADDING", (0, 1), (-1, -1), 1.5)]
+        for side in ("G", "R"):
+            r0 = len(rows)
+            for k in range(MAXK + 1):
+                x = st["sides"][side]["m"][k]
+                bd = " + ".join(str(v) for v in x["levels"])
+                rows.append(["GREEN" if side == "G" else "RED", MODES[k], x["win"], bd, x["loss"], "%.1f" % (100 * x["wr"]),
+                             "%d / %d" % (x["b2b_day"], x["b2b_chain"]), when(x, "b2b_day_at"), when(x, "b2b_chain_at")])
+                r = len(rows) - 1
+                style.append(("FONTNAME", (5, r), (5, r), "Helvetica-Bold"))
+                if side == st["dominant"]:
+                    style.append(("BACKGROUND", (1, r), (-1, r), colors.Color(0.93, 0.97, 0.9)))
+                elif k % 2 == 1:
+                    style.append(("BACKGROUND", (1, r), (-1, r), ZEBRA))
+            style.append(("SPAN", (0, r0), (0, r0 + MAXK)))
+            style.append(("TEXTCOLOR", (0, r0), (0, r0), GREEN if side == "G" else RED))
+            style.append(("FONTNAME", (0, r0), (0, r0), "Helvetica-Bold"))
+            style.append(("LINEABOVE", (0, r0), (-1, r0), 0.9, NAVY))
+        t = Table(rows, repeatRows=1, colWidths=cw_)
+        t.setStyle(TableStyle(style))
+        title = Paragraph("Minute :%02d   -   %d days   |   Green %d (%.0f%%)   Red %d (%.0f%%)   Doji %d" % (
+            st["minute"], st["days"], st["g"], gp, st["r"], 100 - gp if tot else 0.0, st["doji"]), h2)
+        story.append(KeepTogether([title, t]))
+    story.append(PageBreak())
+    story.append(Paragraph("Daily candle tables (G = green, R = red, D = doji)", h2))
+    for i in res["days"]:
         story.append(KeepTogether([DayGrid(i)]))
     bio = io.BytesIO()
     doc = SimpleDocTemplate(bio, pagesize=page, leftMargin=M, rightMargin=M, topMargin=M, bottomMargin=M,
@@ -339,21 +364,21 @@ def make_pdf(res):
 
 
 # ------------------------------------------------------------------ Telegram text (Bengali)
-def bn_text(res, limit=8):
+def bn_text(res, limit=6):
     out = []
     for st in res["stats"][:limit]:
         tot = st["g"] + st["r"]
         gp = round(100 * st["g"] / tot) if tot else 0
         out.append(":%02d  (%d দিন • গ্রিন %d%% • রেড %d%% • ডোজি %d)" % (st["minute"], st["days"], gp, 100 - gp if tot else 0, st["doji"]))
         for side, icon, nm in (("G", "🟢", "গ্রিন"), ("R", "🔴", "রেড")):
-            sd = st["sides"][side]
-            a, b = sd["non"], sd["mtg"]
+            ms = st["sides"][side]["m"]
             star = " ⭐" if side == st["dominant"] else ""
-            out.append("%s %s%s: নন-MTG %.0f%% (%d/%d) • MTG1 %.0f%% (%d/%d) • B2B লস %d/%d | %d/%d" % (
-                icon, nm, star, 100 * a["wr"], a["win"], a["n"], 100 * b["wr"], b["win"], b["n"],
-                a["b2b_day"], a["b2b_chain"], b["b2b_day"], b["b2b_chain"]))
-            out.append("    📅 সর্বোচ্চ লস কবে — নন-MTG: দিনে %s; চেইন %s" % (a["b2b_day_at"] or "-", a["b2b_chain_at"] or "-"))
-            out.append("    📅 MTG1: দিনে %s; চেইন %s" % (b["b2b_day_at"] or "-", b["b2b_chain_at"] or "-"))
+            out.append("%s %s%s: " % (icon, nm, star) + " • ".join(
+                "%s %.0f%%" % (["নন-MTG", "MTG1", "MTG2", "MTG3"][k], 100 * ms[k]["wr"]) for k in range(MAXK + 1)))
+            out.append("    B2B লস (দিনে/চেইন): " + " • ".join(
+                "%s %d/%d" % (["নন", "M1", "M2", "M3"][k], ms[k]["b2b_day"], ms[k]["b2b_chain"]) for k in range(MAXK + 1)))
+            out.append("    📅 চেইন কবে: " + " • ".join(
+                "%s %s" % (["নন", "M1", "M2", "M3"][k], ms[k]["b2b_chain_at"] or "-") for k in range(MAXK + 1)))
         out.append("")
     if len(res["stats"]) > limit:
         out.append("… বাকি মিনিটগুলো PDF/CSV-তে।")
