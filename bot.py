@@ -111,8 +111,7 @@ LEGEND = ("✅ = টেস্ট পিরিয়ডেও টিকেছে 
 
 
 def head_cmds():
-    return ("/scan — এখনই স্ক্যান\n/bugs — পাওয়া বাগের তালিকা\n/csv — তালিকা CSV ফাইলে\n"
-            "/check USDJPY 30 UP 12-24 — একটা নির্দিষ্ট স্লটের হিসাব\n/engine2 — নতুন ইঞ্জিন ২ (Back Signal Discovery)\n/engine3 — ইঞ্জিন ৩ (মিনিট গ্রিড: G/R টেবিল + উইন রেশিও, PDF/CSV)\n/engine4 — ইঞ্জিন ৪ (ব্যাক-টু-ব্যাক লসের পর সিগন্যাল গোনা)\n/live — লাইভ অ্যালার্ট চালু/বন্ধ\n/status — অবস্থা\n/data — ডেটা কভারেজ\n/id — আমার Telegram ID")
+    return ("/check USDJPY 30 UP 12-24 — একটা নির্দিষ্ট স্লটের হিসাব\n/engine3 — ইঞ্জিন ৩ (মিনিট গ্রিড: G/R টেবিল + উইন রেশিও, PDF/CSV)\n/engine4 — ইঞ্জিন ৪ (ব্যাক-টু-ব্যাক লসের পর সিগন্যাল গোনা)\n/live — লাইভ অ্যালার্ট চালু/বন্ধ\n/status — অবস্থা\n/data — ডেটা কভারেজ\n/id — আমার Telegram ID")
 
 
 # ---------------------------------------------------------------- scan
@@ -319,7 +318,7 @@ def live_text(cf, rules):
                                               "No-MTG" if r["mtg"] == 0 else "MTG%d" % r["mtg"],
                                               "" if r["nloss"] == 0 else " (%d লসের পর)" % r["nloss"]) for r in rules[:20])
     else:
-        t += "\nওয়াচলিস্ট ফাঁকা — আগে /scan চালাও।"
+        t += "\nওয়াচলিস্ট ফাঁকা — অটো স্ক্যান শেষ হলে ভরবে।"
     return t
 
 
@@ -1011,8 +1010,7 @@ async def auto_scan_loop(app):
 async def post_init(app):
     global APP
     APP = app
-    cmds = [BotCommand("scan", "এখনই বাগ স্ক্যান"), BotCommand("bugs", "পাওয়া বাগের তালিকা"), BotCommand("csv", "তালিকা CSV"), BotCommand("engine2", "ইঞ্জিন ২: Back Signal Discovery"),
-            BotCommand("engine3", "ইঞ্জিন ৩: মিনিট গ্রিড (G/R টেবিল, PDF/CSV)"),
+    cmds = [BotCommand("engine3", "ইঞ্জিন ৩: মিনিট গ্রিড (G/R টেবিল, PDF/CSV)"),
             BotCommand("engine4", "ইঞ্জিন ৪: ব্যাক-টু-ব্যাক লসের পর সিগন্যাল"),
             BotCommand("live", "লাইভ অ্যালার্ট"), BotCommand("status", "অবস্থা"), BotCommand("data", "ডেটা কভারেজ"), BotCommand("check", "একটা স্লটের হিসাব দেখো"),
             BotCommand("id", "আমার Telegram ID")]
@@ -1067,20 +1065,14 @@ def main():
     threading.Thread(target=serve, daemon=True).start()
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("scan", cmd_scan))
-    app.add_handler(CommandHandler("bugs", cmd_bugs))
-    app.add_handler(CommandHandler("csv", cmd_csv))
     app.add_handler(CommandHandler("live", cmd_live))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("data", cmd_data))
     app.add_handler(CommandHandler("check", cmd_check))
-    app.add_handler(CommandHandler("engine2", cmd_engine2))
     app.add_handler(CommandHandler("engine3", cmd_engine3))
     app.add_handler(CommandHandler("engine4", cmd_engine4))
     app.add_handler(CommandHandler("id", cmd_id))
-    app.add_handler(CallbackQueryHandler(on_bugs_cb, pattern=r"^bg:"))
     app.add_handler(CallbackQueryHandler(on_live_cb, pattern=r"^lv:"))
-    app.add_handler(CallbackQueryHandler(on_e2_cb, pattern=r"^e2:"))
     app.add_handler(CallbackQueryHandler(on_e3_cb, pattern=r"^e3:"))
     app.add_handler(CallbackQueryHandler(on_e4_cb, pattern=r"^e4:"))
     app.run_polling(drop_pending_updates=True)
