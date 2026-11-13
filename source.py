@@ -12,6 +12,28 @@ _SQL = ("SELECT ts, (CASE WHEN c>o THEN 1 WHEN c<o THEN -1 ELSE 0 END)::smallint
         "WHERE pair=%s AND ts>=%s AND ts<%s ORDER BY ts")
 
 
+_SQL_OC = ("SELECT ts, o::float8, c::float8 FROM candles "
+           "WHERE pair=%s AND ts>=%s AND ts<%s ORDER BY ts")
+
+
+def load_oc(pair, from_ts, to_ts):
+    """-> (ts int64, open float64, close float64) of the M1 candles in [from_ts, to_ts). Engine 3 needs open/close
+    (not only the colour) because 3/5-minute candles are built from the one-minute ones."""
+    rows_all = []
+    with _conn(pair) as c:
+        with c.cursor(name="e3load") as cur:
+            cur.execute(_SQL_OC, (pairs.PID[pair], int(from_ts), int(to_ts)))
+            while True:
+                rows = cur.fetchmany(50000)
+                if not rows:
+                    break
+                rows_all.append(np.array(rows, dtype=np.float64))
+    if not rows_all:
+        return np.zeros(0, np.int64), np.zeros(0), np.zeros(0)
+    a = np.concatenate(rows_all)
+    return a[:, 0].astype(np.int64), a[:, 1], a[:, 2]
+
+
 def enabled():
     return bool(URLS)
 

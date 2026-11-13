@@ -17,6 +17,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 
 import engine
 import engine2
+import engine3
 import live
 import oanda
 import pairs
@@ -110,7 +111,7 @@ LEGEND = ("✅ = টেস্ট পিরিয়ডেও টিকেছে 
 
 def head_cmds():
     return ("/scan — এখনই স্ক্যান\n/bugs — পাওয়া বাগের তালিকা\n/csv — তালিকা CSV ফাইলে\n"
-            "/check USDJPY 30 UP 12-24 — একটা নির্দিষ্ট স্লটের হিসাব\n/engine2 — নতুন ইঞ্জিন ২ (Back Signal Discovery)\n/live — লাইভ অ্যালার্ট চালু/বন্ধ\n/status — অবস্থা\n/data — ডেটা কভারেজ\n/id — আমার Telegram ID")
+            "/check USDJPY 30 UP 12-24 — একটা নির্দিষ্ট স্লটের হিসাব\n/engine2 — নতুন ইঞ্জিন ২ (Back Signal Discovery)\n/engine3 — ইঞ্জিন ৩ (মিনিট গ্রিড: G/R টেবিল + উইন রেশিও, PDF/CSV)\n/live — লাইভ অ্যালার্ট চালু/বন্ধ\n/status — অবস্থা\n/data — ডেটা কভারেজ\n/id — আমার Telegram ID")
 
 
 # ---------------------------------------------------------------- scan
@@ -649,6 +650,158 @@ async def on_e2_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         pass
 
 
+# ---------------------------------------------------------------- /engine3  (Minute Grid: G/R table + win ratio, PDF / CSV)
+E3 = dict(tf=1, months=1, out="PDF", pairs=[], minutes=[], page="main")
+E3_MONTHS = {1: "1M", 2: "2M", 3: "3M", 6: "6M", 12: "1Y"}
+E3_OUT = {"PDF": "PDF", "CSV": "CSV", "BOTH": "দুটোই"}
+
+
+def e3_text():
+    ps = ", ".join(pairs.pretty(p) for p in E3["pairs"]) or "— (বাছাই করোনি)"
+    ms = " ".join(":%02d" % m for m in sorted(E3["minutes"])) or "— (বাছাই করোনি)"
+    return ("🧮 ইঞ্জিন ৩ — মিনিট গ্রিড\n\n"
+            "প্রতি ঘণ্টার (১২টা–২৩টা, UTC+6) বাছাই করা মিনিটের ক্যান্ডেল G/R টেবিলে সাজায়, নন-MTG ও MTG1 উইনিং রেশিও এবং ব্যাক-টু-ব্যাক লস বের করে।\n\n"
+            "⚙️ এখনকার সেটিং:\n• টাইম ফ্রেম: %d মিনিট\n• সময়কাল: %s\n• আউটপুট: %s\n• পেয়ার: %s\n• মিনিট: %s\n\n"
+            "পেয়ার ও মিনিট বাছাই করে ▶️ চালাও চাপো। (/engine3 USDJPY EURJPY লিখলে পেয়ার আগে থেকেই বাছা হবে)" % (
+                E3["tf"], E3_MONTHS[E3["months"]], E3_OUT[E3["out"]], ps, ms))
+
+
+def e3_kb():
+    def tick(on, label):
+        return ("✔ " if on else "") + label
+    if E3["page"] == "pairs":
+        rows, cur = [], []
+        for p in pairs.PAIRS:
+            cur.append(Btn(tick(p in E3["pairs"], pairs.pretty(p)), callback_data="e3:tp:%s" % p))
+            if len(cur) == 3:
+                rows.append(cur)
+                cur = []
+        if cur:
+            rows.append(cur)
+        rows.append([Btn("সব পেয়ার", callback_data="e3:pall:0"), Btn("পরিষ্কার", callback_data="e3:pclr:0"), Btn("⬅️ ফিরে", callback_data="e3:pg:main")])
+        return Markup(rows)
+    if E3["page"] == "minutes":
+        rows, cur = [], []
+        for m in range(0, 60, E3["tf"]):
+            cur.append(Btn(tick(m in E3["minutes"], "%02d" % m), callback_data="e3:tm:%d" % m))
+            if len(cur) == 6:
+                rows.append(cur)
+                cur = []
+        if cur:
+            rows.append(cur)
+        rows.append([Btn("সব মিনিট", callback_data="e3:mall:0"), Btn("পরিষ্কার", callback_data="e3:mclr:0"), Btn("⬅️ ফিরে", callback_data="e3:pg:main")])
+        return Markup(rows)
+    return Markup([
+        [Btn(tick(E3["tf"] == v, "%d মিনিট" % v), callback_data="e3:tf:%d" % v) for v in (1, 3, 5)],
+        [Btn(tick(E3["months"] == v, lb), callback_data="e3:mo:%d" % v) for v, lb in E3_MONTHS.items()],
+        [Btn(tick(E3["out"] == v, lb), callback_data="e3:out:%s" % v) for v, lb in E3_OUT.items()],
+        [Btn("💱 পেয়ার (%d)" % len(E3["pairs"]), callback_data="e3:pg:pairs"), Btn("⏱ মিনিট (%d)" % len(E3["minutes"]), callback_data="e3:pg:minutes")],
+        [Btn("▶️ চালাও", callback_data="e3:run:0")]])
+
+
+async def e3_job(chat_id, prog, st):
+    async def progress(t):
+        try:
+            await prog.edit_text(t)
+        except BadRequest:
+            pass
+    if not source.enabled():
+        return await progress("❌ DATABASE_URL_1/2/3 সেট করা নেই (লাইভ বটের ক্যান্ডেল ডেটাবেজ)।")
+    days = engine3.PERIOD_DAYS[st["months"]]
+    stamp = dt.datetime.now(pairs.BDT).strftime("%Y%m%d_%H%M")
+    missing = []
+    try:
+        async with SCAN_LOCK:       # same lock as /scan and /engine2 (Render's small RAM)
+            for i, pair in enumerate(st["pairs"]):
+                await progress("⏳ ইঞ্জিন ৩: %d/%d • %s" % (i + 1, len(st["pairs"]), pairs.pretty(pair)))
+                now = int(time.time())
+                ts, o, c = await asyncio.to_thread(source.load_oc, pair, now - (days + 10) * 86400, now + 86400)
+                res = await asyncio.to_thread(engine3.analyze, pair, ts, o, c, st["tf"], st["months"], st["minutes"])
+                if res is None:
+                    missing.append(pairs.pretty(pair))
+                    continue
+                tag = "%s_M%d_%s" % (pair, st["tf"], stamp)
+                head = "📊 %s • %d মিনিট • %s • %d ট্রেডিং-দিন (%s → %s)" % (
+                    pairs.pretty(pair), st["tf"], E3_MONTHS[st["months"]], len(res["days"]),
+                    engine3.day_date(res["d0"], res["days"][0]), engine3.day_date(res["d0"], res["days"][-1]))
+                body = engine3.bn_text(res)
+                for part in chunks(head + "\n\n" + body):
+                    await send(chat_id, part)
+                if st["out"] in ("PDF", "BOTH"):
+                    await progress("⏳ PDF বানাচ্ছি: %s" % pairs.pretty(pair))
+                    bio = await asyncio.to_thread(engine3.make_pdf, res)
+                    bio.name = "engine3_%s.pdf" % tag
+                    await APP.bot.send_document(chat_id, bio, caption=head[:1000])
+                if st["out"] in ("CSV", "BOTH"):
+                    g, s = await asyncio.to_thread(engine3.make_csv, res)
+                    await APP.bot.send_document(chat_id, io.BytesIO(g), filename="engine3_grid_%s.csv" % tag, caption="G/R গ্রিড (প্রতি দিন × ঘণ্টা × মিনিট)")
+                    await APP.bot.send_document(chat_id, io.BytesIO(s), filename="engine3_summary_%s.csv" % tag, caption="উইন রেশিও ও ব্যাক-টু-ব্যাক লস")
+    except Exception as e:  # noqa
+        log.exception("engine3 failed")
+        return await progress("❌ ইঞ্জিন ৩ হয়নি: %s" % e)
+    try:
+        await prog.delete()
+    except Exception:  # noqa
+        pass
+    if missing:
+        await send(chat_id, "ডেটা নেই/কম: %s" % ", ".join(missing))
+    await send(chat_id, "✅ ইঞ্জিন ৩ শেষ।")
+
+
+async def cmd_engine3(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return await deny(update)
+    only = [p for p in (pairs.norm(t) for a in (ctx.args or []) for t in a.replace(",", " ").split()) if p]
+    if only:
+        E3["pairs"] = list(dict.fromkeys(only))
+    E3["page"] = "main"
+    await update.effective_message.reply_text(e3_text(), reply_markup=e3_kb())
+
+
+async def on_e3_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    if not allowed(update):
+        return await q.answer("অনুমতি নেই", show_alert=True)
+    _, key, val = q.data.split(":", 2)
+    if key == "run":
+        if not E3["pairs"] or not E3["minutes"]:
+            return await q.answer("আগে অন্তত একটা পেয়ার আর একটা মিনিট বাছো", show_alert=True)
+        if SCAN_LOCK.locked():
+            return await q.answer("একটা স্ক্যান চলছে, শেষ হলে চাপো।", show_alert=True)
+        await q.answer("শুরু হচ্ছে…")
+        prog = await q.message.reply_text("⏳ ইঞ্জিন ৩ শুরু…")
+        st = dict(E3, pairs=list(E3["pairs"]), minutes=sorted(E3["minutes"]))
+        ctx.application.bot_data["e3_job"] = asyncio.create_task(e3_job(q.message.chat_id, prog, st))
+        return
+    await q.answer()
+    if key == "pg":
+        E3["page"] = val
+    elif key == "tf":
+        E3["tf"] = int(val)
+        E3["minutes"] = [m for m in E3["minutes"] if m % E3["tf"] == 0]
+    elif key == "mo":
+        E3["months"] = int(val)
+    elif key == "out":
+        E3["out"] = val
+    elif key == "tp":
+        E3["pairs"] = [p for p in E3["pairs"] if p != val] if val in E3["pairs"] else E3["pairs"] + [val]
+    elif key == "pall":
+        E3["pairs"] = list(pairs.PAIRS)
+    elif key == "pclr":
+        E3["pairs"] = []
+    elif key == "tm":
+        m = int(val)
+        E3["minutes"] = [x for x in E3["minutes"] if x != m] if m in E3["minutes"] else E3["minutes"] + [m]
+    elif key == "mall":
+        E3["minutes"] = list(range(0, 60, E3["tf"]))
+    elif key == "mclr":
+        E3["minutes"] = []
+    try:
+        await q.edit_message_text(e3_text(), reply_markup=e3_kb())
+    except BadRequest:
+        pass
+
+
 # ---------------------------------------------------------------- background
 async def auto_scan_loop(app):
     """Neon is read only when a scan is due (the next due time is kept in memory), so it can sleep in between."""
@@ -681,6 +834,7 @@ async def post_init(app):
     global APP
     APP = app
     cmds = [BotCommand("scan", "এখনই বাগ স্ক্যান"), BotCommand("bugs", "পাওয়া বাগের তালিকা"), BotCommand("csv", "তালিকা CSV"), BotCommand("engine2", "ইঞ্জিন ২: Back Signal Discovery"),
+            BotCommand("engine3", "ইঞ্জিন ৩: মিনিট গ্রিড (G/R টেবিল, PDF/CSV)"),
             BotCommand("live", "লাইভ অ্যালার্ট"), BotCommand("status", "অবস্থা"), BotCommand("data", "ডেটা কভারেজ"), BotCommand("check", "একটা স্লটের হিসাব দেখো"),
             BotCommand("id", "আমার Telegram ID")]
     try:
@@ -742,10 +896,12 @@ def main():
     app.add_handler(CommandHandler("data", cmd_data))
     app.add_handler(CommandHandler("check", cmd_check))
     app.add_handler(CommandHandler("engine2", cmd_engine2))
+    app.add_handler(CommandHandler("engine3", cmd_engine3))
     app.add_handler(CommandHandler("id", cmd_id))
     app.add_handler(CallbackQueryHandler(on_bugs_cb, pattern=r"^bg:"))
     app.add_handler(CallbackQueryHandler(on_live_cb, pattern=r"^lv:"))
     app.add_handler(CallbackQueryHandler(on_e2_cb, pattern=r"^e2:"))
+    app.add_handler(CallbackQueryHandler(on_e3_cb, pattern=r"^e3:"))
     app.run_polling(drop_pending_updates=True)
 
 
