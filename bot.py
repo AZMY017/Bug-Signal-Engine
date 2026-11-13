@@ -724,9 +724,6 @@ async def e3_job(chat_id, prog, st):
                 head = "📊 %s • %d মিনিট • %s • %d ট্রেডিং-দিন (%s → %s)" % (
                     pairs.pretty(pair), st["tf"], E3_MONTHS[st["months"]], len(res["days"]),
                     engine3.day_date(res["d0"], res["days"][0]), engine3.day_date(res["d0"], res["days"][-1]))
-                body = engine3.bn_text(res)
-                for part in chunks(head + "\n\n" + body):
-                    await send(chat_id, part)
                 if st["out"] in ("PDF", "BOTH"):
                     await progress("⏳ PDF বানাচ্ছি: %s" % pairs.pretty(pair))
                     bio = await asyncio.to_thread(engine3.make_pdf, res)
@@ -890,8 +887,6 @@ async def e4_job(chat_id, prog, st):
                     pairs.pretty(pair), st["tf"], engine3.MODES[st["mtg"]].replace("No-MTG", "নন-MTG"), st["n"], E4_MODE[st["mode"]],
                     E4_SCOPE[st["scope"]], E3_MONTHS[st["months"]], len(res["days"]),
                     engine3.day_date(res["d0"], res["days"][0]), engine3.day_date(res["d0"], res["days"][-1]))
-                for part in chunks(head + "\n\n" + engine4.bn_text(res)):
-                    await send(chat_id, part)
                 tag = "%s_M%d_%s" % (pair, st["tf"], stamp)
                 if st["out"] in ("PDF", "BOTH"):
                     await progress("⏳ PDF বানাচ্ছি: %s" % pairs.pretty(pair))
