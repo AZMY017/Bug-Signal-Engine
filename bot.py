@@ -651,7 +651,8 @@ async def on_e2_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ---------------------------------------------------------------- /engine3  (Minute Grid: G/R table + win ratio, PDF / CSV)
-E3 = dict(tf=1, months=1, out="PDF", pairs=[], minutes=[], page="main")
+E3 = dict(tf=1, months=1, out="PDF", mtg=3, pairs=[], minutes=[], page="main")
+E3_MTG = {0: "নন-MTG", 1: "MTG1", 2: "MTG2", 3: "MTG3"}
 E3_MONTHS = {1: "1M", 2: "2M", 3: "3M", 6: "6M", 12: "1Y"}
 E3_OUT = {"PDF": "PDF", "CSV": "CSV", "BOTH": "দুটোই"}
 
@@ -661,9 +662,9 @@ def e3_text():
     ms = " ".join(":%02d" % m for m in sorted(E3["minutes"])) or "— (বাছাই করোনি)"
     return ("🧮 ইঞ্জিন ৩ — মিনিট গ্রিড\n\n"
             "প্রতি ঘণ্টার (১২টা–২৩টা, UTC+6) বাছাই করা মিনিটের ক্যান্ডেল G/R টেবিলে সাজায়, নন-MTG ও MTG1 উইনিং রেশিও এবং ব্যাক-টু-ব্যাক লস বের করে।\n\n"
-            "⚙️ এখনকার সেটিং:\n• টাইম ফ্রেম: %d মিনিট\n• সময়কাল: %s\n• আউটপুট: %s\n• পেয়ার: %s\n• মিনিট: %s\n\n"
+            "⚙️ এখনকার সেটিং:\n• টাইম ফ্রেম: %d মিনিট\n• সময়কাল: %s\n• আউটপুট: %s\n• MTG: %s পর্যন্ত\n• পেয়ার: %s\n• মিনিট: %s\n\n"
             "পেয়ার ও মিনিট বাছাই করে ▶️ চালাও চাপো। (/engine3 USDJPY EURJPY লিখলে পেয়ার আগে থেকেই বাছা হবে)" % (
-                E3["tf"], E3_MONTHS[E3["months"]], E3_OUT[E3["out"]], ps, ms))
+                E3["tf"], E3_MONTHS[E3["months"]], E3_OUT[E3["out"]], E3_MTG[E3["mtg"]], ps, ms))
 
 
 def e3_kb():
@@ -694,6 +695,7 @@ def e3_kb():
     return Markup([
         [Btn(tick(E3["tf"] == v, "%d মিনিট" % v), callback_data="e3:tf:%d" % v) for v in (1, 3, 5)],
         [Btn(tick(E3["months"] == v, lb), callback_data="e3:mo:%d" % v) for v, lb in E3_MONTHS.items()],
+        [Btn(tick(E3["mtg"] == v, lb), callback_data="e3:mtg:%d" % v) for v, lb in E3_MTG.items()],
         [Btn(tick(E3["out"] == v, lb), callback_data="e3:out:%s" % v) for v, lb in E3_OUT.items()],
         [Btn("💱 পেয়ার (%d)" % len(E3["pairs"]), callback_data="e3:pg:pairs"), Btn("⏱ মিনিট (%d)" % len(E3["minutes"]), callback_data="e3:pg:minutes")],
         [Btn("▶️ চালাও", callback_data="e3:run:0")]])
@@ -726,11 +728,11 @@ async def e3_job(chat_id, prog, st):
                     engine3.day_date(res["d0"], res["days"][0]), engine3.day_date(res["d0"], res["days"][-1]))
                 if st["out"] in ("PDF", "BOTH"):
                     await progress("⏳ PDF বানাচ্ছি: %s" % pairs.pretty(pair))
-                    bio = await asyncio.to_thread(engine3.make_pdf, res)
+                    bio = await asyncio.to_thread(engine3.make_pdf, res, st["mtg"])
                     bio.name = "engine3_%s.pdf" % tag
                     await APP.bot.send_document(chat_id, bio, caption=head[:1000])
                 if st["out"] in ("CSV", "BOTH"):
-                    g, s = await asyncio.to_thread(engine3.make_csv, res)
+                    g, s = await asyncio.to_thread(engine3.make_csv, res, st["mtg"])
                     await APP.bot.send_document(chat_id, io.BytesIO(g), filename="engine3_grid_%s.csv" % tag, caption="G/R গ্রিড (প্রতি দিন × ঘণ্টা × মিনিট)")
                     await APP.bot.send_document(chat_id, io.BytesIO(s), filename="engine3_summary_%s.csv" % tag, caption="উইন রেশিও ও ব্যাক-টু-ব্যাক লস")
     except Exception as e:  # noqa
@@ -780,6 +782,8 @@ async def on_e3_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         E3["months"] = int(val)
     elif key == "out":
         E3["out"] = val
+    elif key == "mtg":
+        E3["mtg"] = int(val)
     elif key == "tp":
         E3["pairs"] = [p for p in E3["pairs"] if p != val] if val in E3["pairs"] else E3["pairs"] + [val]
     elif key == "pall":

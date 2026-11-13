@@ -197,7 +197,7 @@ def _letter(dv, vv):
     return ("G" if dv == 1 else "R" if dv == -1 else "D") if vv else ""
 
 
-def make_csv(res):
+def make_csv(res, kmax=MAXK):
     """-> (grid_csv bytes, summary_csv bytes). Grid: one row per day+hour, one column per minute slot."""
     tf, per = res["tf"], 60 // res["tf"]
     g = io.StringIO()
@@ -215,7 +215,7 @@ def make_csv(res):
                 "b2b_loss_chain", "b2b_loss_chain_when"])
     for st in res["stats"]:
         for side in ("G", "R"):
-            for k in range(MAXK + 1):
+            for k in range(kmax + 1):
                 x = st["sides"][side]["m"][k]
                 lv = x["levels"] + [""] * (MAXK + 1 - len(x["levels"]))
                 w.writerow([res["pair"], tf, "%02d" % st["minute"], st["days"], st["g"], st["r"], st["doji"],
@@ -225,7 +225,7 @@ def make_csv(res):
 
 
 # ------------------------------------------------------------------ PDF
-def make_pdf(res):
+def make_pdf(res, kmax=MAXK):
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import ParagraphStyle
@@ -331,9 +331,9 @@ def make_pdf(res):
                  ("BOTTOMPADDING", (0, 1), (-1, -1), 1.5)]
         for side in ("G", "R"):
             r0 = len(rows)
-            for k in range(MAXK + 1):
+            for k in range(kmax + 1):
                 x = st["sides"][side]["m"][k]
-                bd = " + ".join(str(v) for v in x["levels"])
+                bd = " + ".join(str(v) for v in x["levels"][:kmax + 1])
                 rows.append(["GREEN" if side == "G" else "RED", MODES[k], x["win"], bd, x["loss"], "%.1f" % (100 * x["wr"]),
                              "%d / %d" % (x["b2b_day"], x["b2b_chain"]), when(x, "b2b_day_at"), when(x, "b2b_chain_at")])
                 r = len(rows) - 1
@@ -342,7 +342,7 @@ def make_pdf(res):
                     style.append(("BACKGROUND", (1, r), (-1, r), colors.Color(0.93, 0.97, 0.9)))
                 elif k % 2 == 1:
                     style.append(("BACKGROUND", (1, r), (-1, r), ZEBRA))
-            style.append(("SPAN", (0, r0), (0, r0 + MAXK)))
+            style.append(("SPAN", (0, r0), (0, r0 + kmax)))
             style.append(("TEXTCOLOR", (0, r0), (0, r0), GREEN if side == "G" else RED))
             style.append(("FONTNAME", (0, r0), (0, r0), "Helvetica-Bold"))
             style.append(("LINEABOVE", (0, r0), (-1, r0), 0.9, NAVY))
