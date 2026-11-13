@@ -1503,7 +1503,7 @@ async def on_e7_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ---------------------------------------------------------------- /engine8  (Engine 6's lowest-B2B minutes, sent as plain Telegram text instead of a PDF)
-E8 = dict(tf=1, months=3, mtg=[0], pairs=[], minutes=[], page="main", wait=False)
+E8 = dict(tf=1, months=3, mtg=[1], pairs=[], minutes=[], page="main", wait=False)
 
 
 def e8_text():

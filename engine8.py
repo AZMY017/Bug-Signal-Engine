@@ -23,9 +23,17 @@ def collect(res, levels):
 
 
 def minutes_line(rows):
-    """':05 :12 :30' for the minutes with the lowest one-day B2B loss, or '—' when there is no data."""
-    _, mins = engine7.lowest(rows)
-    return " ".join(":%02d" % m for m in mins) if mins else "—"
+    """-> (lowest one-day B2B loss, ':05 :12 :30') for the minutes that share it, sorted by time; (None, '—') when no data."""
+    lo, mins = engine7.lowest(rows)
+    if lo is None:
+        return None, "—"
+    return lo, " ".join(":%02d" % m for m in sorted(mins))
+
+
+def side_block(icon, name, rows):
+    lo, line = minutes_line(rows)
+    title = "%s %s" % (icon, name) if lo is None else "%s %s • B2B ডে লস: %d" % (icon, name, lo)
+    return "%s\n%s" % (title, line)
 
 
 def messages(head, rows_by_k, labels):
@@ -36,7 +44,7 @@ def messages(head, rows_by_k, labels):
     blocks = []
     for k in sorted(rows_by_k):
         d = rows_by_k[k]
-        blocks.append("%s\n\n🟢 গ্রিন\n%s\n\n🔴 রেড\n%s" % (labels.get(k, MODES[k]), minutes_line(d["G"]), minutes_line(d["R"])))
+        blocks.append("%s\n\n%s\n\n%s" % (labels.get(k, MODES[k]), side_block("🟢", "গ্রিন", d["G"]), side_block("🔴", "রেড", d["R"])))
     out, cur = [], head
     for b in blocks:
         nxt = cur + "\n\n━━━━━━━━━━\n" + b
