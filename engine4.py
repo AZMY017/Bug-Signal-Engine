@@ -130,67 +130,153 @@ def make_csv(res):
 
 
 # ------------------------------------------------------------------ PDF
-def make_pdf(res):
+import os
+
+FONT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts", "FreeSans.ttf")   # GNU FreeSans (has Bengali)
+WD_BN = ["সোম", "মঙ্গল", "বুধ", "বৃহ", "শুক্র", "শনি", "রবি"]
+
+
+def bn_pdf_ok():
+    """Bengali PDF needs the font file AND Pillow's text shaping (raqm) - reportlab alone cannot join Bengali letters."""
+    try:
+        from PIL import features
+        return os.path.exists(FONT_PATH) and bool(features.check("raqm"))
+    except Exception:  # noqa
+        return False
+
+
+def make_pdf(res, lang="auto"):
+    """lang 'bn' = Bengali text (rendered with shaping as images), 'en' = English, 'auto' = Bengali when possible."""
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import ParagraphStyle
-    from reportlab.platypus import KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    from reportlab.platypus import Image as RLImage, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-    k = res["k"]
+    bn = bn_pdf_ok() if lang == "auto" else (lang == "bn" and bn_pdf_ok())
+    res["pdf_lang"] = "bn" if bn else "en"
+    SC = 4.0   # image pixels per point
+
+    def rgb(c):
+        return tuple(int(round(255 * v)) for v in (c.red, c.green, c.blue))
+
+    def T(en, bnt, size=8, color=colors.black, bold=False, maxw=None, align="left"):
+        """text cell/flowable: English string in English mode, shaped Bengali image in Bengali mode."""
+        if not bn:
+            return en
+        from PIL import Image, ImageDraw, ImageFont
+        f = ImageFont.truetype(FONT_PATH, int(size * SC), layout_engine=ImageFont.Layout.RAQM)
+        lines, cur = [], ""
+        for w_ in bnt.split(" "):
+            t_ = (cur + " " + w_).strip()
+            if maxw and cur and f.getlength(t_) > maxw * SC:
+                lines.append(cur)
+                cur = w_
+            else:
+                cur = t_
+        lines.append(cur)
+        lead = int(size * SC * 1.55)
+        wpx = max(int(f.getlength(x)) for x in lines) + 6
+        hpx = lead * len(lines) + int(size * SC * 0.35)
+        im = Image.new("RGBA", (wpx, hpx), rgb(color) + (0,))
+        d = ImageDraw.Draw(im)
+        for n, x in enumerate(lines):
+            d.text((3, n * lead + int(size * SC * 0.2)), x, font=f, fill=rgb(color) + (255,), stroke_width=(1 if bold else 0), stroke_fill=rgb(color) + (255,))
+        bio_ = io.BytesIO()
+        im.save(bio_, "PNG")
+        bio_.seek(0)
+        img = RLImage(bio_, width=wpx / SC, height=hpx / SC)
+        img.hAlign = "LEFT" if align == "left" else "CENTER"
+        return img
+
     pair = res["pair"].replace("_", "/")
     GREEN, RED = colors.Color(0.0, 0.5, 0.25), colors.Color(0.8, 0.15, 0.2)
     NAVY, ZEBRA, LINE = colors.Color(0.09, 0.22, 0.4), colors.Color(0.94, 0.96, 0.98), colors.Color(0.8, 0.84, 0.9)
     page = landscape(A4)
     M = 24
+    width = page[0] - 2 * M
     h1 = ParagraphStyle("h1", fontName="Helvetica-Bold", fontSize=15, textColor=NAVY, spaceAfter=4)
-    h2 = ParagraphStyle("h2", fontName="Helvetica-Bold", fontSize=10.5, textColor=NAVY, spaceBefore=8, spaceAfter=3)
     p9 = ParagraphStyle("p9", fontName="Helvetica", fontSize=8.5, leading=11)
+
+    def flow(en, bnt, size=8.5, color=colors.black, bold=False, style=p9):
+        if bn:
+            return T(en, bnt, size, color, bold, maxw=width)
+        return Paragraph(en, style)
+
     dts = [e3.day_date(res["d0"], i) for i in res["days"]]
-    story = [Paragraph("%s  -  Engine 4 Loss-Streak Signals  (M%d)" % (pair, res["tf"]), h1)]
-    story.append(Paragraph("Period: %s to %s (%d trading days, last %s)  |  Entry hours 12:00-23:59 BDT (UTC+6)  |  %s" % (
-        dts[0], dts[-1], len(dts), {1: "1 month", 2: "2 months", 3: "3 months", 6: "6 months", 12: "1 year"}[res["months"]], _mode_text(res)), p9))
+    per_en = {1: "1 month", 2: "2 months", 3: "3 months", 6: "6 months", 12: "1 year"}[res["months"]]
+    per_bn = {1: "১ মাস", 2: "২ মাস", 3: "৩ মাস", 6: "৬ মাস", 12: "১ বছর"}[res["months"]]
+    mtg_bn = MODES[res["k"]].replace("No-MTG", "নন-MTG")
+    rule_en = _mode_text(res)
+    rule_bn = "%s | পরপর %d লস (%s, %s)" % (mtg_bn, res["n_loss"], "N বা বেশি" if res["atleast"] else "ঠিক N", "ডে" if res["scope"] == "day" else "চেইন")
+
+    story = [flow("%s  -  Engine 4 Loss-Streak Signals  (M%d)" % (pair, res["tf"]),
+                  "%s  -  ইঞ্জিন ৪: লসের পর সিগন্যাল  (M%d)" % (pair, res["tf"]), 15, NAVY, True, h1)]
+    story.append(flow("Period: %s to %s (%d trading days, last %s)  |  Entry hours 12:00-23:59 BDT (UTC+6)  |  %s" % (dts[0], dts[-1], len(dts), per_en, rule_en),
+                      "সময়কাল: %s থেকে %s (%d ট্রেডিং-দিন, শেষ %s)  |  ঘণ্টা ১২:০০–২৩:৫৯ (UTC+6)  |  %s" % (dts[0], dts[-1], len(dts), per_bn, rule_bn), 8.5))
     story.append(Spacer(1, 3))
-    story.append(Paragraph(
+    story.append(flow(
         "<b>How to read:</b> every hour you trade the chosen minute (GREEN or RED). A <b>signal</b> is the trade that comes right after the chosen number of "
         "back-to-back losses. <b>Win breakdown</b> = wins that came directly, then from MTG step 1, 2, 3. "
         "<b>Doji rule:</b> a doji candle (open = close) is counted as a WIN (entry or MTG step); the column <b>Doji wins</b> says how many of the signal wins were doji wins. "
-        "<b>No data</b> = a candle was missing, nothing counted. <b>All trades</b> = win rate of that same slot without any streak condition, for comparison.", p9))
-    head = ["Minute", "Trade", "Signals", "Win", "of which doji", "Loss", "WR %", "Win breakdown", "No data", "All trades WR %"]
+        "<b>No data</b> = a candle was missing, nothing counted. <b>All trades</b> = win rate of that same slot without any streak condition, for comparison.",
+        "কীভাবে পড়বে: প্রতি ঘণ্টায় তুমি বাছা মিনিটে ট্রেড করো (গ্রিন বা রেড)। পরপর যতগুলো লস বেছেছ তার ঠিক পরের ট্রেডটাই সিগন্যাল। "
+        "উইন ভাঙা = কয়টা উইন সরাসরি এসেছে, আর কয়টা MTG-র ১ম, ২য়, ৩য় ধাপে। "
+        "ডোজির নিয়ম: ডোজি ক্যান্ডেল (ওপেন = ক্লোজ) উইন হিসেবে গোনা হয়েছে; 'তার মধ্যে ডোজি' কলামে দেখা যাবে সিগন্যালের উইনগুলোর মধ্যে কয়টা ডোজির কারণে উইন। "
+        "ডেটা নেই = ক্যান্ডেল মিসিং, কিছু গোনা হয়নি। সব ট্রেডে উইন রেট = কোনো লস-শর্ত ছাড়া ওই একই স্লটের উইন রেট, তুলনার জন্য।", 8.5))
+    story.append(Spacer(1, 5))
+    story.append(flow("<b>Summary</b>", "সারসংক্ষেপ", 10.5, NAVY, True,
+                      ParagraphStyle("h2", fontName="Helvetica-Bold", fontSize=10.5, textColor=NAVY, spaceAfter=3)))
+    WH = colors.white
+    head = [T("Minute", "মিনিট", 8, WH, True, align="c"), T("Trade", "ট্রেড", 8, WH, True, align="c"), T("Signals", "সিগন্যাল", 8, WH, True, align="c"),
+            T("Win", "উইন", 8, WH, True, align="c"), T("of which doji", "তার মধ্যে ডোজি", 8, WH, True, align="c"), T("Loss", "লস", 8, WH, True, align="c"),
+            T("WR %", "উইন রেট %", 8, WH, True, align="c"), T("Win breakdown", "উইন ভাঙা", 8, WH, True, align="c"),
+            T("No data", "ডেটা নেই", 8, WH, True, align="c"), T("All trades WR %", "সব ট্রেডে উইন রেট %", 8, WH, True, align="c")]
     rows = [head]
     style = [("BACKGROUND", (0, 0), (-1, 0), NAVY), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white), ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
              ("FONTSIZE", (0, 0), (-1, -1), 8), ("ALIGN", (0, 0), (-1, -1), "CENTER"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
              ("GRID", (0, 0), (-1, -1), 0.4, LINE)]
     for r in res["rows"]:
-        bd = " + ".join(str(v) for v in r["levels"])
-        rows.append([":%02d" % r["minute"], "GREEN" if r["side"] == "G" else "RED", r["sig"], r["win"], r["doji_win"], r["loss"],
-                     "%.1f" % (100 * r["wr"]) if r["sig"] else "-", bd, r["missing"], "%.1f (%d/%d)" % (100 * r["base_wr"], r["base_win"], r["base_loss"])])
+        gcol = GREEN if r["side"] == "G" else RED
+        rows.append([":%02d" % r["minute"],
+                     T("GREEN" if r["side"] == "G" else "RED", "গ্রিন" if r["side"] == "G" else "রেড", 8, gcol, True, align="c"),
+                     r["sig"], r["win"], r["doji_win"], r["loss"], "%.1f" % (100 * r["wr"]) if r["sig"] else "-",
+                     " + ".join(str(v) for v in r["levels"]), r["missing"], "%.1f (%d/%d)" % (100 * r["base_wr"], r["base_win"], r["base_loss"])])
         i = len(rows) - 1
-        style.append(("TEXTCOLOR", (1, i), (1, i), GREEN if r["side"] == "G" else RED))
-        style.append(("FONTNAME", (1, i), (1, i), "Helvetica-Bold"))
+        if not bn:
+            style.append(("TEXTCOLOR", (1, i), (1, i), gcol))
+            style.append(("FONTNAME", (1, i), (1, i), "Helvetica-Bold"))
         if i % 2 == 0:
             style.append(("BACKGROUND", (0, i), (-1, i), ZEBRA))
-    t = Table(rows, repeatRows=1, colWidths=[50, 55, 55, 45, 70, 45, 50, 110, 55, 110])
+    t = Table(rows, repeatRows=1, colWidths=[50, 55, 55, 45, 75, 45, 55, 110, 55, 115])
     t.setStyle(TableStyle(style))
-    story += [Paragraph("Summary", h2), t]
+    story.append(t)
     for r in res["rows"]:
         if not r["signals"]:
             continue
         story.append(PageBreak())
-        story.append(Paragraph("Signals  -  minute :%02d  %s  (%d signals: %d win, %d loss, %d of the wins are doji)" % (
-            r["minute"], "GREEN" if r["side"] == "G" else "RED", r["sig"], r["win"], r["loss"], r["doji_win"]), h2))
-        data = [["#", "Date", "Day", "Hour", "Result", "Won at", "Doji win"]]
+        side_en, side_bn = ("GREEN", "গ্রিন") if r["side"] == "G" else ("RED", "রেড")
+        story.append(flow("<b>Signals - minute :%02d %s (%d signals: %d win, %d loss, %d of the wins are doji)</b>" % (r["minute"], side_en, r["sig"], r["win"], r["loss"], r["doji_win"]),
+                          "সিগন্যালের তালিকা — মিনিট :%02d %s (%d সিগন্যাল: %d উইন, %d লস; উইনের মধ্যে %d টা ডোজি)" % (r["minute"], side_bn, r["sig"], r["win"], r["loss"], r["doji_win"]),
+                          10.5, NAVY, True, ParagraphStyle("h2b", fontName="Helvetica-Bold", fontSize=10.5, textColor=NAVY, spaceAfter=4)))
+        data = [["#", T("Date", "তারিখ", 7.6, WH, True, align="c"), T("Day", "বার", 7.6, WH, True, align="c"), T("Hour", "ঘণ্টা", 7.6, WH, True, align="c"),
+                 T("Result", "ফলাফল", 7.6, WH, True, align="c"), T("Won at", "কোন ধাপে", 7.6, WH, True, align="c"), T("Doji win", "ডোজি উইন", 7.6, WH, True, align="c")]]
         st2 = [("BACKGROUND", (0, 0), (-1, 0), NAVY), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white), ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-               ("FONTSIZE", (0, 0), (-1, -1), 7.6), ("ALIGN", (0, 0), (-1, -1), "CENTER"), ("GRID", (0, 0), (-1, -1), 0.4, LINE),
+               ("FONTSIZE", (0, 0), (-1, -1), 7.6), ("ALIGN", (0, 0), (-1, -1), "CENTER"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("GRID", (0, 0), (-1, -1), 0.4, LINE),
                ("TOPPADDING", (0, 0), (-1, -1), 1.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5)]
         for n, (dayno, h, v, L, d_) in enumerate(r["signals"], 1):
             dd = e3.day_date(res["d0"], dayno)
-            data.append([n, dd.isoformat(), e3.WD[dd.weekday()], "%02d:%02d" % (h, r["minute"]), "WIN" if v == 1 else "LOSS",
-                         ("direct" if L == 0 else "MTG%d" % L) if v == 1 else "-", "YES" if d_ else ""])
-            st2.append(("TEXTCOLOR", (4, n), (4, n), GREEN if v == 1 else RED))
-            st2.append(("FONTNAME", (4, n), (4, n), "Helvetica-Bold"))
+            col = GREEN if v == 1 else RED
+            won_en = ("direct" if L == 0 else "MTG%d" % L) if v == 1 else "-"
+            won_bn = ("সরাসরি" if L == 0 else "MTG%d" % L) if v == 1 else "-"
+            data.append([n, dd.isoformat(), T(e3.WD[dd.weekday()], WD_BN[dd.weekday()], 7.6, align="c"), "%02d:%02d" % (h, r["minute"]),
+                         T("WIN" if v == 1 else "LOSS", "উইন" if v == 1 else "লস", 7.6, col, True, align="c"), T(won_en, won_bn, 7.6, align="c"),
+                         T("YES", "হ্যাঁ", 7.6, align="c") if d_ else ""])
+            if not bn:
+                st2.append(("TEXTCOLOR", (4, n), (4, n), col))
+                st2.append(("FONTNAME", (4, n), (4, n), "Helvetica-Bold"))
             if n % 2 == 0:
                 st2.append(("BACKGROUND", (0, n), (-1, n), ZEBRA))
-        t2 = Table(data, repeatRows=1, colWidths=[35, 80, 45, 60, 60, 65, 60])
+        t2 = Table(data, repeatRows=1, colWidths=[35, 80, 50, 60, 60, 70, 65])
         t2.setStyle(TableStyle(st2))
         story.append(t2)
     bio = io.BytesIO()

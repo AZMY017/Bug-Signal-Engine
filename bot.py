@@ -669,7 +669,7 @@ def e3_text():
 
 def e3_kb():
     def tick(on, label):
-        return ("✔ " if on else "") + label
+        return ("✅ " if on else "") + label
     if E3["page"] == "pairs":
         rows, cur = [], []
         for p in pairs.PAIRS:
@@ -818,6 +818,9 @@ def e4_text():
             "প্রতি ঘণ্টার (১২টা–২৩টা, UTC+6) বাছাই করা মিনিটে তুমি গ্রিন/রেড ট্রেড করলে — পরপর N টা লস হওয়ার পর পরের ট্রেডটা "
             "নির্বাচিত সময়ের মধ্যে কয়বার এসেছে, কয়টা উইন, কয়টা লস, কয়টা ডোজি — সেটা বের করে।\n\n"
             "⚙️ এখনকার সেটিং:\n• টাইম ফ্রেম: %d মিনিট\n• MTG: %s\n• ব্যাক-টু-ব্যাক লস: %d টা (%s)\n• গণনা: %s\n• ডিরেকশন: %s\n• সময়কাল: %s\n• আউটপুট: %s\n• পেয়ার: %s\n• মিনিট: %s\n• ডোজি: উইন হিসেবে গোনা হয়\n\n"
+            "ℹ️ ঠিক N বনাম N বা বেশি (N = পরপর লসের সংখ্যা):\n"
+            "• ঠিক N: পরপর ঠিক N টা লস হওয়ার পর পরের ট্রেডটাই শুধু সিগন্যাল। (N=২, লস-লস-উইন → ৩য় ট্রেড সিগন্যাল। লস-লস-লস-লস হলে ৩য় ট্রেড সিগন্যাল, ৪র্থটা সিগন্যাল না)\n"
+            "• N বা বেশি: N বা তার বেশি লস চলতে থাকলে প্রতিটা পরের ট্রেড সিগন্যাল। (N=২, লস-লস-লস-লস → ৩য় ও ৪র্থ দুটোই সিগন্যাল)\n\n"
             "বাছাই করে ▶️ চালাও চাপো। (/engine4 USDJPY লিখলে পেয়ার আগে থেকেই বাছা হবে)" % (
                 E4["tf"], engine3.MODES[E4["mtg"]].replace("No-MTG", "নন-MTG"), E4["n"], E4_MODE[E4["mode"]], E4_SCOPE[E4["scope"]],
                 E4_SIDE[E4["side"]], E3_MONTHS[E4["months"]], E4_OUT[E4["out"]], ps, ms))
@@ -825,7 +828,7 @@ def e4_text():
 
 def e4_kb():
     def tick(on, label):
-        return ("✔ " if on else "") + label
+        return ("✅ " if on else "") + label
     if E4["page"] == "pairs":
         rows, cur = [], []
         for p in pairs.PAIRS:
@@ -895,7 +898,8 @@ async def e4_job(chat_id, prog, st):
                     await progress("⏳ PDF বানাচ্ছি: %s" % pairs.pretty(pair))
                     bio = await asyncio.to_thread(engine4.make_pdf, res)
                     bio.name = "engine4_%s.pdf" % tag
-                    await APP.bot.send_document(chat_id, bio, caption=head[:1000])
+                    note = "" if res.get("pdf_lang") == "bn" else "\n(বাংলা ফন্ট/শেপিং সার্ভারে নেই, তাই PDF ইংরেজিতে)"
+                    await APP.bot.send_document(chat_id, bio, caption=(head[:900] + note))
                 if st["out"] in ("CSV", "BOTH"):
                     s_, g_ = await asyncio.to_thread(engine4.make_csv, res)
                     await APP.bot.send_document(chat_id, io.BytesIO(s_), filename="engine4_summary_%s.csv" % tag, caption="সিগন্যাল/উইন/লস সারসংক্ষেপ")
