@@ -22,6 +22,7 @@ import engine3
 import engine4
 import engine5
 import engine6
+import engine7
 import live
 import oanda
 import pairs
@@ -114,7 +115,7 @@ LEGEND = ("✅ = টেস্ট পিরিয়ডেও টিকেছে 
 
 
 def head_cmds():
-    return ("/check USDJPY 30 UP 12-24 — একটা নির্দিষ্ট স্লটের হিসাব\n/engine3 — ইঞ্জিন ৩ (মিনিট গ্রিড: G/R টেবিল + উইন রেশিও, PDF/CSV)\n/engine4 — ইঞ্জিন ৪ (ব্যাক-টু-ব্যাক লসের পর সিগন্যাল গোনা)\n/engine5 — ইঞ্জিন ৫ (র‍্যাংকড চার্ট: প্রতি MTG-র আলাদা চার্ট, কম B2B লস আগে)\n/engine6 — ইঞ্জিন ৬ (ইঞ্জিন ৩-এর মতো, কিন্তু গ্রিন/রেড আলাদা চার্ট, একদিনের কম B2B লস আগে)\n/live — লাইভ অ্যালার্ট চালু/বন্ধ\n/status — অবস্থা\n/data — ডেটা কভারেজ\n/id — আমার Telegram ID")
+    return ("/check USDJPY 30 UP 12-24 — একটা নির্দিষ্ট স্লটের হিসাব\n/engine3 — ইঞ্জিন ৩ (মিনিট গ্রিড: G/R টেবিল + উইন রেশিও, PDF/CSV)\n/engine4 — ইঞ্জিন ৪ (ব্যাক-টু-ব্যাক লসের পর সিগন্যাল গোনা)\n/engine5 — ইঞ্জিন ৫ (র‍্যাংকড চার্ট: প্রতি MTG-র আলাদা চার্ট, কম B2B লস আগে)\n/engine6 — ইঞ্জিন ৬ (ইঞ্জিন ৩-এর মতো, কিন্তু গ্রিন/রেড আলাদা চার্ট, একদিনের কম B2B লস আগে)\n/engine7 — ইঞ্জিন ৭ (ইঞ্জিন ৬-এর হিসাব, কিন্তু PDF নয়: সর্বনিম্ন B2B লসের মিনিটগুলো টেলিগ্রামে বাটনে ✅)\n/live — লাইভ অ্যালার্ট চালু/বন্ধ\n/status — অবস্থা\n/data — ডেটা কভারেজ\n/id — আমার Telegram ID")
 
 
 # ---------------------------------------------------------------- scan
@@ -793,6 +794,7 @@ async def cmd_engine3(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E3["wait"] = False
     E5["wait"] = False
     E6["wait"] = False
+    E7["wait"] = False
     await update.effective_message.reply_text(e3_text(), reply_markup=e3_kb())
 
 
@@ -804,6 +806,8 @@ async def on_e3_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return await on_e5_text(update, ctx)
     if E6["wait"]:
         return await on_e6_text(update, ctx)
+    if E7["wait"]:
+        return await on_e7_text(update, ctx)
     if not E3["wait"]:
         return
     months = e3_parse_period(update.effective_message.text or "")
@@ -841,6 +845,7 @@ async def on_e3_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             E3["wait"] = True
             E5["wait"] = False
             E6["wait"] = False
+            E7["wait"] = False
             await q.message.reply_text(
                 "✏️ কত দিনের ব্যাক-টেস্ট চাও লেখো:\n• মাস: 7 অথবা 7M\n• দিন: 45D\n• বছর: 1Y\n(সর্বোচ্চ %d দিন)" % E3_MAX_DAYS)
             return
@@ -976,6 +981,7 @@ async def cmd_engine5(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E5["page"] = "main"
     E5["wait"] = False
     E6["wait"] = False
+    E7["wait"] = False
     E3["wait"] = False
     await update.effective_message.reply_text(e5_text(), reply_markup=e5_kb())
 
@@ -988,6 +994,7 @@ async def on_e5_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E5["months"] = months
     E5["wait"] = False
     E6["wait"] = False
+    E7["wait"] = False
     E5["page"] = "main"
     await update.effective_message.reply_text(e5_text(), reply_markup=e5_kb())
 
@@ -1018,11 +1025,13 @@ async def on_e5_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             E5["wait"] = True
             E3["wait"] = False
             E6["wait"] = False
+            E7["wait"] = False
             await q.message.reply_text(
                 "✏️ কত দিনের ব্যাক-টেস্ট চাও লেখো:\n• মাস: 7 অথবা 7M\n• দিন: 45D\n• বছর: 1Y\n(সর্বোচ্চ %d দিন)" % E3_MAX_DAYS)
             return
         E5["wait"] = False
         E6["wait"] = False
+        E7["wait"] = False
         E5["months"] = int(val)
     elif key == "out":
         E5["out"] = val
@@ -1152,6 +1161,7 @@ async def cmd_engine6(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         E6["pairs"] = list(dict.fromkeys(only))
     E6["page"] = "main"
     E6["wait"] = False
+    E7["wait"] = False
     E3["wait"] = False
     E5["wait"] = False
     await update.effective_message.reply_text(e6_text(), reply_markup=e6_kb())
@@ -1185,10 +1195,12 @@ async def on_e6_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             E6["wait"] = True
             E3["wait"] = False
             E5["wait"] = False
+            E7["wait"] = False
             await q.message.reply_text(
                 "✏️ কত দিনের ব্যাক-টেস্ট চাও লেখো:\n• মাস: 7 অথবা 7M\n• দিন: 45D\n• বছর: 1Y\n(সর্বোচ্চ %d দিন)" % E3_MAX_DAYS)
             return
         E6["wait"] = False
+        E7["wait"] = False
         E6["months"] = int(val)
     elif key == "out":
         E6["out"] = val
@@ -1221,10 +1233,257 @@ async def on_e6_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return await update.effective_message.reply_text("বুঝিনি। এভাবে লেখো: 7 / 7M / 45D / 1Y (১–%d দিনের মধ্যে)" % E3_MAX_DAYS)
     E6["months"] = months
     E6["wait"] = False
+    E7["wait"] = False
     E6["page"] = "main"
     await update.effective_message.reply_text(e6_text(), reply_markup=e6_kb())
 
 
+
+
+# ---------------------------------------------------------------- /engine7  (Engine 6's lowest-B2B minutes, shown as ticked Telegram buttons instead of a PDF)
+E7 = dict(tf=1, months=3, mtg=[0], pairs=[], minutes=[], side="G", page="main", wait=False)
+E7R = dict(order=[], data={})          # last run: pair order + per pair {head, tf, rows:{k:{'G':rows,'R':rows}}}
+E7_SIDE = {"G": "🟢 গ্রিন", "R": "🔴 রেড"}
+
+
+def e7_tick(on, label):
+    return ("✅ " if on else "") + label
+
+
+def e7_text():
+    ps = ", ".join(pairs.pretty(p) for p in E7["pairs"]) or "— (বাছাই করোনি)"
+    ms = " ".join(":%02d" % m for m in sorted(E7["minutes"])) or "— (বাছাই করোনি)"
+    return ("🧮 ইঞ্জিন ৭ — সর্বনিম্ন B2B লসের মিনিট (বাটনে)\n\n"
+            "হিসাব ইঞ্জিন ৬-এর হুবহু একই, শুধু PDF নয়: একদিনের ব্যাক-টু-ব্যাক লস যে মিনিটগুলোতে সবচেয়ে কম, সেগুলো টেলিগ্রামে বাটনে 🟢 (গ্রিন) বা 🔴 (রেড) চিহ্ন দিয়ে দেখাবে। গ্রিন বা রেড বেছে নাও।\n\n"
+            "⚙️ এখনকার সেটিং:\n• টাইম ফ্রেম: %d মিনিট\n• সময়কাল: %s\n• MTG (যেগুলো বাছা): %s\n• দেখবো: %s\n• পেয়ার: %s\n• মিনিট: %s\n\n"
+            "পেয়ার ও মিনিট বাছাই করে ▶️ চালাও চাপো। (/engine7 USDJPY EURJPY লিখলে পেয়ার আগে থেকেই বাছা হবে)" % (
+                E7["tf"], e3_label(E7["months"]), (" + ".join(E3_MTG[v] for v in sorted(E7["mtg"])) or "— (বাছাই করোনি)"),
+                E7_SIDE[E7["side"]], ps, ms))
+
+
+def e7_kb():
+    tick = e7_tick
+    if E7["page"] == "pairs":
+        rows, cur = [], []
+        for p in pairs.PAIRS:
+            cur.append(Btn(tick(p in E7["pairs"], pairs.pretty(p)), callback_data="e7:tp:%s" % p))
+            if len(cur) == 3:
+                rows.append(cur)
+                cur = []
+        if cur:
+            rows.append(cur)
+        rows.append([Btn("সব পেয়ার", callback_data="e7:pall:0"), Btn("পরিষ্কার", callback_data="e7:pclr:0"), Btn("⬅️ ফিরে", callback_data="e7:pg:main")])
+        return Markup(rows)
+    if E7["page"] == "minutes":
+        rows, cur = [], []
+        for m in range(0, 60, E7["tf"]):
+            cur.append(Btn(tick(m in E7["minutes"], "%02d" % m), callback_data="e7:tm:%d" % m))
+            if len(cur) == 6:
+                rows.append(cur)
+                cur = []
+        if cur:
+            rows.append(cur)
+        rows.append([Btn("সব মিনিট", callback_data="e7:mall:0"), Btn("পরিষ্কার", callback_data="e7:mclr:0"), Btn("⬅️ ফিরে", callback_data="e7:pg:main")])
+        return Markup(rows)
+    return Markup([
+        [Btn(tick(E7["tf"] == v, "%d মিনিট" % v), callback_data="e7:tf:%d" % v) for v in (1, 3, 5)],
+        [Btn(tick(E7["months"] == v, "%dM" % v), callback_data="e7:mo:%d" % v) for v in E3_PRESETS]
+        + [Btn(tick(E7["months"] not in E3_PRESETS, "✏️ " + e3_label(E7["months"]) if E7["months"] not in E3_PRESETS else "✏️"), callback_data="e7:mo:custom")],
+        [Btn(tick(v in E7["mtg"], lb), callback_data="e7:mtg:%d" % v) for v, lb in E3_MTG.items()],
+        [Btn(tick(E7["side"] == v, lb), callback_data="e7:sd:%s" % v) for v, lb in E7_SIDE.items()],
+        [Btn("💱 পেয়ার (%d)" % len(E7["pairs"]), callback_data="e7:pg:pairs"), Btn("⏱ মিনিট (%d)" % len(E7["minutes"]), callback_data="e7:pg:minutes")],
+        [Btn("▶️ চালাও", callback_data="e7:run:0")]])
+
+
+def e7_view(pair, k, side):
+    """Result page: lowest-B2B minutes as a ticked button grid. -> (text, Markup) or None when the data is gone."""
+    d = E7R["data"].get(pair)
+    if not d or k not in d["rows"]:
+        return None
+    rows = d["rows"][k][side]
+    lo, mins = engine7.lowest(rows)
+    mark = "🟢" if side == "G" else "🔴"
+    if lo is None:
+        body = "কোনো মিনিটের ডেটা নেই।"
+    else:
+        body = ("সর্বনিম্ন ব্যাক-টু-ব্যাক লস (একদিনে) = %d\nমিনিট (সেরা আগে): %s\n\n%s = এই %d টা মিনিট। কোনো মিনিটের বাটন টিপলে উইন/লস/WR/B2B দেখাবে।" % (
+            lo, " ".join(":%02d" % m for m in mins), mark, len(mins)))
+    text = "%s\n\n%s • %s চার্ট\n\n%s" % (d["head"], E3_MTG[k], E7_SIDE[side], body)
+    kb = []
+    order = E7R["order"]
+    if len(order) > 1:
+        cur = []
+        for p in order:
+            cur.append(Btn(e7_tick(p == pair, pairs.pretty(p)), callback_data="e7:v:%s:%d:%s" % (p, k, side)))
+            if len(cur) == 3:
+                kb.append(cur)
+                cur = []
+        if cur:
+            kb.append(cur)
+    kb.append([Btn(e7_tick(kk == k, E3_MTG[kk]), callback_data="e7:v:%s:%d:%s" % (pair, kk, side)) for kk in sorted(d["rows"])])
+    kb.append([Btn(e7_tick(side == sd, lb), callback_data="e7:v:%s:%d:%s" % (pair, k, sd)) for sd, lb in E7_SIDE.items()])
+    have = {r["minute"] for r in rows}
+    hit = set(mins)
+    cur = []
+    for m in range(0, 60, d["tf"]):
+        if m not in have:
+            cur.append(Btn("· %02d" % m, callback_data="e7:x:0"))
+        else:
+            cur.append(Btn(("%s %02d" % (mark, m)) if m in hit else "%02d" % m, callback_data="e7:m:%s:%d:%s:%d" % (pair, k, side, m)))
+        if len(cur) == 6:
+            kb.append(cur)
+            cur = []
+    if cur:
+        kb.append(cur)
+    return text, Markup(kb)
+
+
+async def e7_job(chat_id, prog, st):
+    async def progress(t):
+        try:
+            await prog.edit_text(t)
+        except BadRequest:
+            pass
+    if not source.enabled():
+        return await progress("❌ DATABASE_URL_1/2/3 সেট করা নেই (লাইভ বটের ক্যান্ডেল ডেটাবেজ)।")
+    days = engine3.period_days(st["months"])
+    missing, data, order = [], {}, []
+    try:
+        async with SCAN_LOCK:       # same lock as /scan and /engine2 (Render's small RAM)
+            for i, pair in enumerate(st["pairs"]):
+                await progress("⏳ ইঞ্জিন ৭: %d/%d • %s" % (i + 1, len(st["pairs"]), pairs.pretty(pair)))
+                now = int(time.time())
+                ts, o, c = await asyncio.to_thread(source.load_oc, pair, now - (days + 10) * 86400, now + 86400)
+                res = await asyncio.to_thread(engine7.analyze, pair, ts, o, c, st["tf"], st["months"], st["minutes"])
+                if res is None:
+                    missing.append(pairs.pretty(pair))
+                    continue
+                head = "📊 %s • %d মিনিট • %s • %d ট্রেডিং-দিন (%s → %s)" % (
+                    pairs.pretty(pair), st["tf"], e3_label(st["months"]), len(res["days"]),
+                    engine3.day_date(res["d0"], res["days"][0]), engine3.day_date(res["d0"], res["days"][-1]))
+                data[pair] = dict(head=head, tf=st["tf"], rows=engine7.collect(res, st["mtg"]))
+                order.append(pair)
+                del res
+    except Exception as e:  # noqa
+        log.exception("engine7 failed")
+        return await progress("❌ ইঞ্জিন ৭ হয়নি: %s" % e)
+    try:
+        await prog.delete()
+    except Exception:  # noqa
+        pass
+    if missing:
+        await send(chat_id, "ডেটা নেই/কম: %s" % ", ".join(missing))
+    if not order:
+        return await send(chat_id, "❌ ইঞ্জিন ৭: কোনো পেয়ারের ডেটা পাওয়া যায়নি।")
+    E7R["data"], E7R["order"] = data, order
+    k0 = min(data[order[0]]["rows"])
+    text, kb = e7_view(order[0], k0, st["side"])
+    await APP.bot.send_message(chat_id, text, reply_markup=kb)
+
+
+async def cmd_engine7(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return await deny(update)
+    only = [p for p in (pairs.norm(t) for a in (ctx.args or []) for t in a.replace(",", " ").split()) if p]
+    if only:
+        E7["pairs"] = list(dict.fromkeys(only))
+    E7["page"] = "main"
+    E7["wait"] = False
+    E3["wait"] = False
+    E5["wait"] = False
+    E6["wait"] = False
+    await update.effective_message.reply_text(e7_text(), reply_markup=e7_kb())
+
+
+async def on_e7_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    if not allowed(update):
+        return await q.answer("অনুমতি নেই", show_alert=True)
+    parts = q.data.split(":")
+    key = parts[1]
+    if key == "x":
+        return await q.answer("এই মিনিট বিশ্লেষণে বাছা হয়নি")
+    if key in ("v", "m"):                       # result page: view switch / minute detail
+        pair, k, side = parts[2], int(parts[3]), parts[4]
+        d = E7R["data"].get(pair)
+        if not d or k not in d["rows"]:
+            return await q.answer("ডেটা নেই (বট রিস্টার্ট হয়েছে?)। আবার /engine7 চালাও।", show_alert=True)
+        if key == "m":
+            m = int(parts[5])
+            r = next((x for x in d["rows"][k][side] if x["minute"] == m), None)
+            if r is None:
+                return await q.answer("এই মিনিটের ডেটা নেই")
+            return await q.answer(engine7.popup(pairs.pretty(pair), k, side, r), show_alert=True)
+        await q.answer()
+        text, kb = e7_view(pair, k, side)
+        try:
+            await q.edit_message_text(text, reply_markup=kb)
+        except BadRequest:
+            pass
+        return
+    val = parts[2]
+    if key == "run":
+        if not E7["pairs"] or not E7["minutes"]:
+            return await q.answer("আগে অন্তত একটা পেয়ার আর একটা মিনিট বাছো", show_alert=True)
+        if not E7["mtg"]:
+            return await q.answer("অন্তত একটা MTG অপশন বাছো (নন-MTG / MTG1 / MTG2 / MTG3)", show_alert=True)
+        if SCAN_LOCK.locked():
+            return await q.answer("একটা স্ক্যান চলছে, শেষ হলে চাপো।", show_alert=True)
+        await q.answer("শুরু হচ্ছে…")
+        prog = await q.message.reply_text("⏳ ইঞ্জিন ৭ শুরু…")
+        st = dict(E7, pairs=list(E7["pairs"]), minutes=sorted(E7["minutes"]), mtg=sorted(E7["mtg"]))
+        ctx.application.bot_data["e7_job"] = asyncio.create_task(e7_job(q.message.chat_id, prog, st))
+        return
+    await q.answer()
+    if key == "pg":
+        E7["page"] = val
+    elif key == "tf":
+        E7["tf"] = int(val)
+        E7["minutes"] = [m for m in E7["minutes"] if m % E7["tf"] == 0]
+    elif key == "mo":
+        if val == "custom":
+            E7["wait"] = True
+            E3["wait"] = False
+            E5["wait"] = False
+            E6["wait"] = False
+            await q.message.reply_text(
+                "✏️ কত দিনের ব্যাক-টেস্ট চাও লেখো:\n• মাস: 7 অথবা 7M\n• দিন: 45D\n• বছর: 1Y\n(সর্বোচ্চ %d দিন)" % E3_MAX_DAYS)
+            return
+        E7["wait"] = False
+        E7["months"] = int(val)
+    elif key == "sd":
+        E7["side"] = val
+    elif key == "mtg":
+        v = int(val)
+        E7["mtg"] = [x for x in E7["mtg"] if x != v] if v in E7["mtg"] else sorted(E7["mtg"] + [v])
+    elif key == "tp":
+        E7["pairs"] = [p for p in E7["pairs"] if p != val] if val in E7["pairs"] else E7["pairs"] + [val]
+    elif key == "pall":
+        E7["pairs"] = list(pairs.PAIRS)
+    elif key == "pclr":
+        E7["pairs"] = []
+    elif key == "tm":
+        m = int(val)
+        E7["minutes"] = [x for x in E7["minutes"] if x != m] if m in E7["minutes"] else E7["minutes"] + [m]
+    elif key == "mall":
+        E7["minutes"] = list(range(0, 60, E7["tf"]))
+    elif key == "mclr":
+        E7["minutes"] = []
+    try:
+        await q.edit_message_text(e7_text(), reply_markup=e7_kb())
+    except BadRequest:
+        pass
+
+
+async def on_e7_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Reply to the ✏️ custom-period prompt of /engine7 (called from on_e3_text)."""
+    months = e3_parse_period(update.effective_message.text or "")
+    if months is None:
+        return await update.effective_message.reply_text("বুঝিনি। এভাবে লেখো: 7 / 7M / 45D / 1Y (১–%d দিনের মধ্যে)" % E3_MAX_DAYS)
+    E7["months"] = months
+    E7["wait"] = False
+    E7["page"] = "main"
+    await update.effective_message.reply_text(e7_text(), reply_markup=e7_kb())
 
 
 # ---------------------------------------------------------------- /engine4  (Loss-streak signal finder)
@@ -1437,6 +1696,7 @@ async def post_init(app):
             BotCommand("engine4", "ইঞ্জিন ৪: ব্যাক-টু-ব্যাক লসের পর সিগন্যাল"),
             BotCommand("engine5", "ইঞ্জিন ৫: র‍্যাংকড চার্ট (কম B2B লস আগে)"),
             BotCommand("engine6", "ইঞ্জিন ৬: গ্রিন/রেড র‍্যাংকড চার্ট (একদিনের কম B2B লস আগে)"),
+            BotCommand("engine7", "ইঞ্জিন ৭: সর্বনিম্ন B2B লসের মিনিট বাটনে (গ্রিন/রেড)"),
             BotCommand("live", "লাইভ অ্যালার্ট"), BotCommand("status", "অবস্থা"), BotCommand("data", "ডেটা কভারেজ"), BotCommand("check", "একটা স্লটের হিসাব দেখো"),
             BotCommand("id", "আমার Telegram ID")]
     try:
@@ -1498,6 +1758,7 @@ def main():
     app.add_handler(CommandHandler("engine4", cmd_engine4))
     app.add_handler(CommandHandler("engine5", cmd_engine5))
     app.add_handler(CommandHandler("engine6", cmd_engine6))
+    app.add_handler(CommandHandler("engine7", cmd_engine7))
     app.add_handler(CommandHandler("id", cmd_id))
     app.add_handler(CallbackQueryHandler(on_live_cb, pattern=r"^lv:"))
     app.add_handler(CallbackQueryHandler(on_e3_cb, pattern=r"^e3:"))
@@ -1505,6 +1766,7 @@ def main():
     app.add_handler(CallbackQueryHandler(on_e4_cb, pattern=r"^e4:"))
     app.add_handler(CallbackQueryHandler(on_e5_cb, pattern=r"^e5:"))
     app.add_handler(CallbackQueryHandler(on_e6_cb, pattern=r"^e6:"))
+    app.add_handler(CallbackQueryHandler(on_e7_cb, pattern=r"^e7:"))
     app.run_polling(drop_pending_updates=True)
 
 
