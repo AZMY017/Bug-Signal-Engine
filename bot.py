@@ -26,6 +26,7 @@ import engine9
 import live
 import oanda
 import radar
+import radar_report
 import pairs
 import resultsdb as rdb
 import source
@@ -1462,7 +1463,7 @@ async def on_e9_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ---------------------------------------------------------------- /engine10  (Signal Radar: Engine 9's 100% slots -> live UP/DOWN alerts)
-E10 = dict(tf=1, months=4, mtg=[1], n=3, mode="exact", minsig=3, pairs=[], page="main", wait=False)   # wait: False | "months" | "tf" | "minsig"
+E10 = dict(tf=1, months=4, mtg=[1], n=3, mode="exact", minsig=3, pdf=False, csv=False, pairs=[], page="main", wait=False)   # wait: False | "months" | "tf" | "minsig"
 E10_TF_PRESETS = (1, 3, 5)
 E10_MINSIG_PRESETS = (1, 3, 5)
 
@@ -1470,18 +1471,29 @@ E10_MINSIG_PRESETS = (1, 3, 5)
 def e10_text():
     ps = ", ".join(pairs.pretty(p) for p in E10["pairs"]) or "— (বাছাই করোনি)"
     st, cf = radar.state(), radar.cfg()
+    on = "চালু ✅" if cf["on"] else "বন্ধ ⏸"
     if st["rules"]:
         when = dt.datetime.fromtimestamp(st["built_at"], pairs.BDT).strftime("%d %b %H:%M")
         w, l, u, o = radar.tally(live.day_start(time.time()))
-        radar_line = "📡 রাডার: %s • তালিকায় %d স্লট (বানানো %s) • আজ ✅ %d ❌ %d" % ("চালু ✅" if cf["on"] else "বন্ধ ⏸", len(st["rules"]), when, w, l)
+        radar_line = "📡 রাডার: %s • তালিকায় %d স্লট (বানানো %s) • আজ ✅ %d ❌ %d" % (on, len(st["rules"]), when, w, l)
     else:
-        radar_line = "📡 রাডার: %s • তালিকা এখনও বানানো হয়নি" % ("চালু ✅" if cf["on"] else "বন্ধ ⏸")
-    return ("🎯 ইঞ্জিন ১০ — সিগন্যাল রাডার\n\n"
-            "ইঞ্জিন ৯-এর হিসাবে যে মিনিটে উইন ১০০%% (কমপক্ষে %d টা সিগন্যালসহ), সেগুলো রাডার তালিকায় যায়। লাইভে ওই মিনিটের আগের ঘণ্টাগুলোতে পরপর %d লস গেলে পরের ঘণ্টার স্লটের ৪৫ সেকেন্ড আগে UP/DOWN সিগন্যাল আসে, তারপর WIN/LOSS রেজাল্ট।\n\n"
-            "⚙️ সেটিং:\n• টাইম ফ্রেম: %d মিনিট\n• সময়কাল: %s\n• MTG: %s\n• ব্যাক-টু-ব্যাক লস: %d টা (%s)\n• ন্যূনতম সিগন্যাল: %d\n• পেয়ার: %s\n\n%s\n"
-            "(তালিকা প্রতিদিন ১১:৩০-এর পর নিজে নতুন হয়, রাডার চালু থাকলে)" % (
-                E10["minsig"], E10["n"], E10["tf"], e3_label(E10["months"]),
-                (" + ".join(E3_MTG[v] for v in sorted(E10["mtg"])) or "— (বাছাই করোনি)"), E10["n"], E4_MODE[E10["mode"]], E10["minsig"], ps, radar_line))
+        radar_line = "📡 রাডার: %s • তালিকা এখনও বানানো হয়নি" % on
+    files = " + ".join(x for x, f in (("PDF", E10["pdf"]), ("CSV", E10["csv"])) if f) or "শুধু টেক্সট"
+    mtg = " + ".join(E3_MTG[v] for v in sorted(E10["mtg"])) or "— (বাছাই করোনি)"
+    lines = [
+        "🎯 ইঞ্জিন ১০ — সিগন্যাল রাডার", "",
+        "ইঞ্জিন ৯-এর হিসাবে যে মিনিটে উইন ১০০%% (কমপক্ষে %d টা সিগন্যালসহ), সেগুলো রাডার তালিকায় যায়। লাইভে ওই মিনিটের আগের ঘণ্টাগুলোতে পরপর %d লস গেলে পরের ঘণ্টার স্লটের ৪৫ সেকেন্ড আগে UP/DOWN সিগন্যাল আসে, তারপর WIN/LOSS রেজাল্ট।" % (E10["minsig"], E10["n"]), "",
+        "⚙️ সেটিং:",
+        "• টাইম ফ্রেম: %d মিনিট" % E10["tf"],
+        "• সময়কাল: %s" % e3_label(E10["months"]),
+        "• MTG: %s" % mtg,
+        "• ব্যাক-টু-ব্যাক লস: %d টা (%s)" % (E10["n"], E4_MODE[E10["mode"]]),
+        "• ন্যূনতম সিগন্যাল: %d" % E10["minsig"],
+        "• ফাইল (টেক্সটের সাথে): %s" % files,
+        "• পেয়ার: %s" % ps, "",
+        radar_line,
+        "(তালিকা প্রতিদিন ১১:৩০-এর পর নিজে নতুন হয়, রাডার চালু থাকলে)"]
+    return "\n".join(lines)
 
 
 def e10_kb():
@@ -1506,8 +1518,9 @@ def e10_kb():
         [Btn(tick(v in E10["mtg"], lb), callback_data="e10:mtg:%d" % v) for v, lb in E3_MTG.items()],
         [Btn(tick(E10["n"] == v, "লস %d" % v), callback_data="e10:n:%d" % v) for v in range(1, 7)],
         [Btn(tick(E10["mode"] == v, lb), callback_data="e10:md:%s" % v) for v, lb in E4_MODE.items()],
-        [Btn(tick(E10["minsig"] == v, "সিগন্যাল ≥%d" % v), callback_data="e10:ms:%d" % v) for v in E10_MINSIG_PRESETS]
-        + [Btn(tick(E10["minsig"] not in E10_MINSIG_PRESETS, "✏️ ≥%d" % E10["minsig"] if E10["minsig"] not in E10_MINSIG_PRESETS else "✏️"), callback_data="e10:ms:custom")],
+        [Btn(tick(E10["minsig"] == v, "সি. ≥%d" % v), callback_data="e10:ms:%d" % v) for v in E10_MINSIG_PRESETS]
+        + [Btn(tick(E10["minsig"] not in E10_MINSIG_PRESETS, "✏️ সি. ≥%d" % E10["minsig"] if E10["minsig"] not in E10_MINSIG_PRESETS else "✏️"), callback_data="e10:ms:custom")],
+        [Btn(tick(E10["pdf"], "📄 PDF"), callback_data="e10:pdf:0"), Btn(tick(E10["csv"], "📊 CSV"), callback_data="e10:csv:0")],
         [Btn("💱 পেয়ার (%d)" % len(E10["pairs"]), callback_data="e10:pg:pairs")],
         [Btn("🔄 তালিকা বানাও", callback_data="e10:build:0"), Btn("📋 তালিকা দেখো", callback_data="e10:show:0")],
         [Btn("⏸ রাডার বন্ধ করো" if on else "📡 রাডার চালু করো", callback_data="e10:tg:0")]])
@@ -1515,11 +1528,12 @@ def e10_kb():
 
 def e10_settings():
     return dict(tf=E10["tf"], months=E10["months"], months_label=e3_label(E10["months"]), mtg=sorted(E10["mtg"]), n=E10["n"],
-                mode=E10["mode"], minsig=E10["minsig"], pairs=list(E10["pairs"]))
+                mode=E10["mode"], minsig=E10["minsig"], pdf=E10["pdf"], csv=E10["csv"], pairs=list(E10["pairs"]))
 
 
 async def e10_build(chat_id, prog, st, auto=False):
-    """Builds the radar list (Neon is read here, once) and saves it; prog is None for the daily automatic rebuild."""
+    """Builds the radar list (Neon is read here, once), saves it, sends the short text (+ PDF / CSV when chosen).
+    prog is None for the daily automatic rebuild."""
     async def progress(i, n):
         if prog:
             try:
@@ -1529,17 +1543,30 @@ async def e10_build(chat_id, prog, st, auto=False):
     async with SCAN_LOCK:
         per = await radar.build(st, progress)
     rules = [r for e in per if e for r in e["rules"]]
-    await radar.set_rules(rules, st)
+    await radar.set_rules(rules, dict(st))
     if prog:
         try:
             await prog.delete()
         except Exception:  # noqa
             pass
-    texts = radar.summary_text(per, st, E3_MTG)
+    texts = radar.summary_text(per, st)
     if auto:
         texts[0] = "🔄 রাডার তালিকা আজকের জন্য নতুন হলো\n\n" + texts[0]
     for t in texts:
         await send(chat_id, t[:4000])
+    stamp = dt.datetime.now(pairs.BDT).strftime("%Y%m%d_%H%M")
+    try:
+        if st.get("pdf"):
+            bio = await asyncio.to_thread(radar_report.make_pdf, per, st)
+            bio.name = "engine10_radar_%s.pdf" % stamp
+            await APP.bot.send_document(chat_id, bio, caption="সিগন্যাল রাডার: সব ডিটেলস (PDF ইংরেজিতে)")
+        if st.get("csv"):
+            s_, g_ = await asyncio.to_thread(radar_report.make_csv, per, st)
+            await APP.bot.send_document(chat_id, io.BytesIO(s_), filename="engine10_slots_%s.csv" % stamp, caption="স্লট সারসংক্ষেপ (রাডারে আছে/নেই + কারণ)")
+            await APP.bot.send_document(chat_id, io.BytesIO(g_), filename="engine10_signals_%s.csv" % stamp, caption="প্রতিটা সিগন্যালের তারিখ ও রেজাল্ট")
+    except Exception:  # noqa
+        log.exception("engine10 report files failed")
+        await send(chat_id, "⚠️ তালিকা হয়েছে, কিন্তু PDF/CSV বানাতে সমস্যা হয়েছে।")
 
 
 async def e10_refresh():
@@ -1599,8 +1626,8 @@ async def on_e10_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     if key == "show":
         await q.answer()
-        for t in [radar.list_text(E3_MTG)]:
-            await q.message.reply_text(t)
+        for t in radar.list_text():
+            await q.message.reply_text(t[:4000])
         return
     if key == "tg":
         if not radar.cfg()["on"] and not radar.state()["rules"]:
@@ -1633,6 +1660,8 @@ async def on_e10_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif key == "ms":
         E10["wait"] = False
         E10["minsig"] = int(val)
+    elif key in ("pdf", "csv"):
+        E10[key] = not E10[key]
     elif key == "mtg":
         v = int(val)
         E10["mtg"] = [x for x in E10["mtg"] if x != v] if v in E10["mtg"] else sorted(E10["mtg"] + [v])

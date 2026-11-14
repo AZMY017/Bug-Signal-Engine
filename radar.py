@@ -129,7 +129,7 @@ async def build(st, progress=None):
             del ts, o, c
             if res is None:
                 return None
-            return dict(pair=pair, days=len(res["days"]), rules=rules_from(res, st["minsig"]))
+            return dict(pair=pair, days=len(res["days"]), rules=rules_from(res, st["minsig"]), res=res)
 
     tasks = [asyncio.create_task(one(p)) for p in plist]
     out = []
@@ -145,55 +145,70 @@ async def build(st, progress=None):
     return out
 
 
-def _m(r, labels):
-    return ":%02d %d/%d%s" % (r["minute"], r["win"], r["sig"], (" " + labels.get(r["mtg"], "MTG%d" % r["mtg"])) if labels.get("multi") else "")
+def _mt(k):
+    return "নন-MTG" if k == 0 else "MTG%d" % k
 
 
-def summary_text(per, st, labels):
-    """Short text of a build result (one block per pair); returns list of messages <= 4000 chars."""
-    lab = dict(labels, multi=len(st["mtg"]) > 1)
-    head = "🎯 সিগন্যাল রাডার তালিকা\n%d মিনিট • %s • পরপর %d লস (%s) • কমপক্ষে %d সিগন্যাল, ১০০%% উইন" % (
-        st["tf"], st["months_label"], st["n"], "N বা বেশি" if st["mode"] == "atleast" else "ঠিক N", st["minsig"])
-    blocks, total = [], 0
-    for p, e in zip(st["pairs"], per):
-        name = pairs.pretty(p)
-        if e is None:
+def _mins(rs, multi):
+    return " ".join(":%02d%s" % (x["minute"], ("·M%d" % x["mtg"]) if multi else "") for x in rs) or "—"
+
+
+def _compose(head, entries):
+    """entries: [(pair name, rules or None)] -> list of messages (<= 3900 chars). Per pair: name + green minutes + red minutes
+    (no counts); the very last block merges the minutes of all pairs, in serial order, each minute once."""
+    multi = len({x["mtg"] for _, rs in entries if rs for x in rs}) > 1
+    blocks, allg, allr = [], set(), set()
+    for name, rs in entries:
+        if rs is None:
             blocks.append("💱 %s — ডেটা নেই/কম" % name)
             continue
-        g = [_m(r, lab) for r in e["rules"] if r["side"] == "G"]
-        r_ = [_m(r, lab) for r in e["rules"] if r["side"] == "R"]
-        total += len(e["rules"])
-        lines = ["💱 %s (%d দিন)" % (name, e["days"])]
-        lines.append("🟢 " + (" • ".join(g) if g else "—"))
-        lines.append("🔴 " + (" • ".join(r_) if r_ else "—"))
-        blocks.append("\n".join(lines))
-    head += "\nমোট রাডার স্লট: %d" % total
+        g = [x for x in rs if x["side"] == "G"]
+        d = [x for x in rs if x["side"] == "R"]
+        allg |= {x["minute"] for x in g}
+        allr |= {x["minute"] for x in d}
+        blocks.append("💱 %s\n🟢 %s\n🔴 %s" % (name, _mins(g, multi), _mins(d, multi)))
+    fmt = lambda s_: " ".join(":%02d" % m for m in sorted(s_)) or "—"  # noqa: E731
+    tail = ("━━━━━━━━━━━━\nসব পেয়ার মিলিয়ে (সিরিয়াল অনুযায়ী, প্রতিটা মিনিট একবার)\n\n"
+            "🟢 UP (%d টা মিনিট)\n%s\n\n🔴 DOWN (%d টা মিনিট)\n%s" % (len(allg), fmt(allg), len(allr), fmt(allr)))
     out, cur = [], head
     for b in blocks:
         if len(cur) + len(b) + 2 > 3900:
             out.append(cur)
-            cur = head
-        cur += "\n\n" + b
+            cur = b
+        else:
+            cur += "\n\n" + b
+    if len(cur) + len(tail) + 2 > 3900:
+        out.append(cur)
+        cur = tail
+    else:
+        cur += "\n\n" + tail
     out.append(cur)
     return out
 
 
-def list_text(labels):
+def summary_text(per, st, labels=None):
+    """Build result -> messages."""
+    head = "🎯 সিগন্যাল রাডার তালিকা\n%d মিনিট • %s • %s • পরপর %d লস (%s) • কমপক্ষে %d সিগন্যাল, ১০০%% উইন\nমোট রাডার স্লট: %d" % (
+        st["tf"], st["months_label"], "+".join(_mt(k) for k in st["mtg"]), st["n"], "N বা বেশি" if st["mode"] == "atleast" else "ঠিক N", st["minsig"],
+        sum(len(e["rules"]) for e in per if e))
+    entries = [(pairs.pretty(p), None if e is None else e["rules"]) for p, e in zip(st["pairs"], per)]
+    return _compose(head, entries)
+
+
+def list_text(labels=None):
     rules, meta = _state["rules"], _state["meta"]
     if not rules:
-        return "রাডার তালিকা এখনও খালি। আগে 🔄 তালিকা বানাও চাপো।"
+        return ["রাডার তালিকা এখনও খালি। আগে 🔄 তালিকা বানাও চাপো।"]
     when = dt.datetime.fromtimestamp(_state["built_at"], pairs.BDT).strftime("%d %b %H:%M")
-    lab = dict(labels, multi=len(set(r["mtg"] for r in rules)) > 1)
-    lines = ["🎯 রাডার তালিকা (বানানো: %s)\n%d মিনিট • %s • পরপর %d লস • কমপক্ষে %d সিগন্যাল" % (
-        when, meta.get("tf", 1), meta.get("months_label", ""), meta.get("n", 0), meta.get("minsig", 0))]
-    by = {}
-    for r in rules:
-        by.setdefault(r["pair"], []).append(r)
-    for p, rs in by.items():
-        g = [_m(r, lab) for r in rs if r["side"] == "G"]
-        r_ = [_m(r, lab) for r in rs if r["side"] == "R"]
-        lines.append("\n💱 %s\n🟢 %s\n🔴 %s" % (pairs.pretty(p), " • ".join(g) or "—", " • ".join(r_) or "—"))
-    return "\n".join(lines)[:4000]
+    head = "🎯 রাডার তালিকা (বানানো: %s)\n%d মিনিট • %s • %s • পরপর %d লস • কমপক্ষে %d সিগন্যাল\nমোট রাডার স্লট: %d" % (
+        when, meta.get("tf", 1), meta.get("months_label", ""), "+".join(_mt(k) for k in meta.get("mtg", [])), meta.get("n", 0),
+        meta.get("minsig", 0), len(rules))
+    order = list(meta.get("pairs") or [])
+    for x in rules:
+        if x["pair"] not in order:
+            order.append(x["pair"])
+    entries = [(pairs.pretty(p), [x for x in rules if x["pair"] == p]) for p in order]
+    return _compose(head, entries)
 
 
 # ---------------------------------------------------------------- 2) live check (same code as the back-test)

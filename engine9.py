@@ -34,7 +34,7 @@ def analyze(pair, ts, o, c, tf, months, ks, n_loss, scope, atleast):
                 sigs, miss = engine4.find_signals(out, lvl, dj, n_loss, scope, atleast)
                 sw = sum(1 for x in sigs if x[2] == 1)
                 rows.append(dict(minute=m, sig=len(sigs), win=sw, loss=len(sigs) - sw,
-                                 doji=sum(1 for x in sigs if x[2] == 1 and x[4]), missing=miss))
+                                 doji=sum(1 for x in sigs if x[2] == 1 and x[4]), missing=miss, signals=sigs))
             sides[side] = dict(lo=lo, rows=rows)
         per[k] = sides
     return dict(pair=pair, tf=tf, months=months, d0=res["d0"], days=res["days"], ks=ks, n_loss=n_loss,
