@@ -1,6 +1,6 @@
 """Engine 6 — Minute Grid, ranked by back-to-back loss (pure numpy + reportlab, no Telegram, no database).
 
-engine.py .. engine5.py are untouched. Engine 6 runs exactly like Engine 3 (same data, same candle / MTG / doji rules,
+engine.py .. engine4.py are untouched. Engine 6 runs exactly like Engine 3 (same data, same candle / MTG / doji rules,
 same pair + minute selection, same B2B day / chain numbers: engine3.analyze is reused 1:1). Only the PDF / CSV layout is new:
 
  * Engine 3 lists the minutes in time order (:00, :01, :02 ...). Engine 6 does NOT.

@@ -5,7 +5,6 @@ Only the output differs: for every pair / MTG step we return one short text with
 heading the minutes that share the LOWEST one-day back-to-back loss.
 """
 import engine6
-import engine7
 
 MAXK = engine6.MAXK
 MODES = engine6.MODES
@@ -18,13 +17,21 @@ def analyze(pair, ts, o, c, tf, months, minutes):
 
 
 def collect(res, levels):
-    """-> {k: {'G': ranked rows, 'R': ranked rows}} (same as Engine 7)."""
-    return engine7.collect(res, levels)
+    """-> {k: {'G': ranked rows, 'R': ranked rows}} for every chosen MTG level (rows already sorted, rank 1 first)."""
+    return {k: {s: engine6.ranked(res, k, s) for s in ("G", "R")} for k in sorted(set(levels))}
+
+
+def lowest(rows):
+    """-> (lowest one-day B2B loss, [minutes that have it, in rank order]); (None, []) when there are no rows."""
+    if not rows:
+        return None, []
+    lo = rows[0]["b2b_day"]          # rows are sorted by b2b_day first
+    return lo, [r["minute"] for r in rows if r["b2b_day"] == lo]
 
 
 def minutes_line(rows):
     """-> (lowest one-day B2B loss, ':05 :12 :30') for the minutes that share it, sorted by time; (None, '—') when no data."""
-    lo, mins = engine7.lowest(rows)
+    lo, mins = lowest(rows)
     if lo is None:
         return None, "—"
     return lo, " ".join(":%02d" % m for m in sorted(mins))
