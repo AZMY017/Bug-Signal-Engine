@@ -26,12 +26,13 @@ MODES = e3.MODES
 SIDE_NAME = {"G": "GREEN", "R": "RED"}
 
 
-def outcomes(dirm, val, tf, minute, days, side, k):
+def outcomes(dirm, val, tf, minute, days, side, k, hours=None):
     """-> (out (days,hours) int8: 1 win, -1 loss, 0 no data ; lvl int8: win level 0..k, -1 otherwise ; dj bool: the win came from a doji)."""
     per = 60 // tf
     S = 1440 // tf
     j = minute // tf
     s = 1 if side == "G" else -1
+    HOURS = hours or globals()["HOURS"]
     fd = np.concatenate((dirm.reshape(-1), np.zeros(MAXK, np.int8))).astype(np.int8)
     fv = np.concatenate((val.reshape(-1), np.zeros(MAXK, bool)))
     idx = days[:, None] * S + np.array([h * per + j for h in HOURS])[None, :]
@@ -81,13 +82,14 @@ def analyze(pair, ts, o, c, tf, months, minutes, sides, k, n_loss, scope, atleas
     if len(lt) == 0:
         return None
     d0, dirm, val = e3.build_grid(lt, d, tf)
-    days = e3.pick_days(dirm, val, tf, months)
+    hours = e3.hours_for(pair)
+    days = e3.pick_days(dirm, val, tf, months, hours)
     if len(days) == 0:
         return None
     rows = []
     for m in sorted(minutes):
         for side in sides:
-            out, lvl, dj = outcomes(dirm, val, tf, m, days, side, k)
+            out, lvl, dj = outcomes(dirm, val, tf, m, days, side, k, hours)
             bw, bl = int((out == 1).sum()), int((out == -1).sum())
             sigs, miss = find_signals(out, lvl, dj, n_loss, scope, atleast)
             sw = sum(1 for x in sigs if x[2] == 1)
@@ -97,8 +99,8 @@ def analyze(pair, ts, o, c, tf, months, minutes, sides, k, n_loss, scope, atleas
                              base_wr=(bw / (bw + bl) if bw + bl else 0.0),
                              sig=len(sigs), win=sw, loss=sl, wr=(sw / len(sigs) if sigs else 0.0),
                              doji_win=sum(1 for x in sigs if x[2] == 1 and x[4]), missing=miss, levels=levels,
-                             signals=[(int(days[i]), HOURS[j], v, L, d_) for i, j, v, L, d_ in sigs]))
-    return dict(pair=pair, tf=tf, months=months, d0=d0, days=days, k=k, n_loss=n_loss, scope=scope, atleast=atleast, rows=rows)
+                             signals=[(int(days[i]), hours[j], v, L, d_) for i, j, v, L, d_ in sigs]))
+    return dict(pair=pair, tf=tf, months=months, d0=d0, days=days, hours=hours, k=k, n_loss=n_loss, scope=scope, atleast=atleast, rows=rows)
 
 
 def _mode_text(res):
@@ -211,8 +213,8 @@ def make_pdf(res, lang="auto"):
 
     story = [flow("%s  -  Engine 4 Loss-Streak Signals  (M%d)" % (pair, res["tf"]),
                   "%s  -  ইঞ্জিন ৪: লসের পর সিগন্যাল  (M%d)" % (pair, res["tf"]), 15, NAVY, True, h1)]
-    story.append(flow("Period: %s to %s (%d trading days, last %s)  |  Entry hours 12:00-23:59 BDT (UTC+6)  |  %s" % (dts[0], dts[-1], len(dts), per_en, rule_en),
-                      "সময়কাল: %s থেকে %s (%d ট্রেডিং-দিন, শেষ %s)  |  ঘণ্টা ১২:০০–২৩:৫৯ (UTC+6)  |  %s" % (dts[0], dts[-1], len(dts), per_bn, rule_bn), 8.5))
+    story.append(flow("Period: %s to %s (%d trading days, last %s)  |  Entry hours %s BDT (UTC+6)  |  %s" % (dts[0], dts[-1], len(dts), per_en, e3.hours_label(res["hours"]), rule_en),
+                      "সময়কাল: %s থেকে %s (%d ট্রেডিং-দিন, শেষ %s)  |  ঘণ্টা %s (UTC+6)  |  %s" % (dts[0], dts[-1], len(dts), per_bn, e3.hours_label(res["hours"]), rule_bn), 8.5))
     story.append(Spacer(1, 3))
     story.append(flow(
         "<b>How to read:</b> every hour you trade the chosen minute (GREEN or RED). A <b>signal</b> is the trade that comes right after the chosen number of "

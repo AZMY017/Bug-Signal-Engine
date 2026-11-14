@@ -30,14 +30,14 @@ def analyze(pair, ts, o, c, tf, months, ks, n_loss, scope, atleast):
             lo, mins = engine8.lowest(coll[k][side])
             rows = []
             for m in sorted(mins):
-                out, lvl, dj = engine4.outcomes(res["dirm"], res["val"], tf, m, res["days"], side, k)
+                out, lvl, dj = engine4.outcomes(res["dirm"], res["val"], tf, m, res["days"], side, k, res["hours"])
                 sigs, miss = engine4.find_signals(out, lvl, dj, n_loss, scope, atleast)
                 sw = sum(1 for x in sigs if x[2] == 1)
                 rows.append(dict(minute=m, sig=len(sigs), win=sw, loss=len(sigs) - sw,
                                  doji=sum(1 for x in sigs if x[2] == 1 and x[4]), missing=miss, signals=sigs))
             sides[side] = dict(lo=lo, rows=rows)
         per[k] = sides
-    return dict(pair=pair, tf=tf, months=months, d0=res["d0"], days=res["days"], ks=ks, n_loss=n_loss,
+    return dict(pair=pair, tf=tf, months=months, d0=res["d0"], days=res["days"], hours=res["hours"], ks=ks, n_loss=n_loss,
                 scope=scope, atleast=atleast, per=per)
 
 

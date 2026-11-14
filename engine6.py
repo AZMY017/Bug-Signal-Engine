@@ -85,6 +85,7 @@ def make_pdf(res, levels=None):
 
     tf, per = res["tf"], 60 // res["tf"]
     sel = set(m // tf for m in res["minutes"])
+    HRS = res.get("hours", HOURS)
     pair = res["pair"].replace("_", "/")
     GREEN, RED = colors.Color(0.0, 0.5, 0.25), colors.Color(0.8, 0.15, 0.2)
     NAVY, LIGHT, ZEBRA = colors.Color(0.09, 0.22, 0.4), colors.Color(0.86, 0.91, 0.96), colors.Color(0.94, 0.96, 0.98)
@@ -111,7 +112,7 @@ def make_pdf(res, levels=None):
             super().__init__()
             self.i = i
             self.width = width
-            self.height = self.TH + self.HH + len(HOURS) * self.RH + 8
+            self.height = self.TH + self.HH + len(HRS) * self.RH + 8
 
         def draw(self):
             cv = self.canv
@@ -134,7 +135,7 @@ def make_pdf(res, levels=None):
                     cv.setFillColor(colors.white)
                 cv.drawCentredString(x + cw / 2, top - self.HH + 3, "%02d" % (k * tf))
             fs = min(7.0, cw * 0.66)
-            for r, h in enumerate(HOURS):
+            for r, h in enumerate(HRS):
                 y = top - self.HH - (r + 1) * self.RH
                 cv.setFillColor(LIGHT)
                 cv.rect(0, y, self.LW, self.RH, stroke=0, fill=1)
@@ -167,8 +168,8 @@ def make_pdf(res, levels=None):
     dts = [e3.day_date(res["d0"], i) for i in res["days"]]
     story = [Paragraph("%s  -  Engine 6 Ranked Minute Charts  (M%d)" % (pair, tf), h1)]
     story.append(Paragraph(
-        "Period: %s to %s  (%d trading days, last %s)   |   Entry hours 12:00-23:59 BDT (UTC+6)   |   Entry minutes: %s" % (
-            dts[0], dts[-1], len(dts), e3.period_label_en(res["months"]),
+        "Period: %s to %s  (%d trading days, last %s)   |   Entry hours %s BDT (UTC+6)   |   Entry minutes: %s" % (
+            dts[0], dts[-1], len(dts), e3.period_label_en(res["months"]), e3.hours_label(HRS),
             ", ".join(":%02d" % m for m in res["minutes"])), p9))
     story.append(Paragraph(
         "<b>How to read:</b> the charts follow this order: <b>No-MTG</b>, then <b>MTG1</b>, <b>MTG2</b>, <b>MTG3</b> (up to the step you chose). "

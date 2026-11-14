@@ -67,7 +67,7 @@ def make_csv(per, st):
     for x in sorted(rows, key=lambda x: (x["pair"], x["side"] != "G", x["minute"], x["k"])):
         for dayno, h, v, lvl, dj in x["signals"]:
             dd = e3.day_date(x["res"]["d0"], x["res"]["days"][dayno])
-            w.writerow([x["pair"], SIDE[x["side"]], "%02d" % x["minute"], MODES[x["k"]], dd.isoformat(), e3.WD[dd.weekday()], "%02d" % (e3.HOURS[h]),
+            w.writerow([x["pair"], SIDE[x["side"]], "%02d" % x["minute"], MODES[x["k"]], dd.isoformat(), e3.WD[dd.weekday()], "%02d" % (x["res"]["hours"][h]),
                         "WIN" if v == 1 else "LOSS", (("direct" if lvl == 0 else "MTG%d" % lvl) if v == 1 else ""), "YES" if dj else "",
                         "YES" if x["radar"] else "NO"])
     return s.getvalue().encode("utf-8-sig"), g.getvalue().encode("utf-8-sig")
@@ -111,9 +111,10 @@ def make_pdf(per, st):
     story = [Paragraph("Signal Radar - Engine 10 (back-test details)", h1)]
     story.append(Paragraph(
         "Time frame: M%d | Period: %s (%s to %s, up to %d trading days) | MTG: %s | Rule: %d back-to-back losses (%s, day scope) | "
-        "Radar rule: win rate 100%% with at least %d signals | Entry hours 12:00-23:59 BDT (UTC+6) | Pairs: %s" % (
+        "Radar rule: win rate 100%% with at least %d signals | Entry hours %s BDT (UTC+6) | Pairs: %s" % (
             st["tf"], st["months_label"], min(dts) if dts else "-", max(dts) if dts else "-", max(days_all) if days_all else 0,
             ", ".join(MODES[k] for k in st["mtg"]), st["n"], "N or more" if st["mode"] == "atleast" else "exactly N", st["minsig"],
+            ", ".join(sorted({e3.hours_label(e["res"]["hours"]) for e in per if e})) or "-",
             ", ".join(pairs.pretty(p) for p in st["pairs"])), p9))
     story.append(Spacer(1, 3))
     story.append(Paragraph(
@@ -152,7 +153,7 @@ def make_pdf(per, st):
         det = []
         for dayno, h, v, lvl, dj in x["signals"]:
             dd = e3.day_date(x["res"]["d0"], x["res"]["days"][dayno])
-            det.append([dd.isoformat(), e3.WD[dd.weekday()], "%02d:%02d" % (e3.HOURS[h], x["minute"]), "WIN" if v == 1 else "LOSS",
+            det.append([dd.isoformat(), e3.WD[dd.weekday()], "%02d:%02d" % (x["res"]["hours"][h], x["minute"]), "WIN" if v == 1 else "LOSS",
                         (("direct" if lvl == 0 else "MTG%d" % lvl) if v == 1 else "-"), "doji" if dj else ""])
         story.append(table(["Date", "Day", "Entry time (BDT)", "Result", "Win at", "Doji"], det, [90, 50, 110, 60, 70, 50]))
     doc.build(story)

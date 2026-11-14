@@ -21,7 +21,17 @@ import io
 import numpy as np
 
 OFF = 6 * 3600                 # UTC+6
-HOURS = list(range(12, 24))    # 12:00 .. 23:59 BDT
+HOURS = list(range(12, 24))    # real market: entries 12:00 .. 23:59 BDT
+ALL_HOURS = list(range(24))    # OTC market: trades round the clock, entries 00:00 .. 23:59 BDT
+
+
+def hours_for(pair):
+    """Entry hours (BDT) of a pair: real market 12..23, OTC pair (name ends with _otc) 0..23."""
+    return ALL_HOURS if pair.endswith("_otc") else HOURS
+
+
+def hours_label(hours):
+    return "%02d:00-23:59" % hours[0]
 PERIOD_DAYS = {1: 30, 2: 60, 3: 90, 6: 180, 12: 365}
 
 
@@ -74,8 +84,9 @@ def build_grid(lt, d, tf):
     return d0, dirm, val
 
 
-def pick_days(dirm, val, tf, months):
-    """Indices of the last N calendar days that have candles in 12..23 (the latest day is dropped if still running)."""
+def pick_days(dirm, val, tf, months, hours=None):
+    """Indices of the last N calendar days that have candles in the entry hours (the latest day is dropped if still running)."""
+    HOURS = hours or globals()["HOURS"]
     per = 60 // tf
     win = val[:, HOURS[0] * per:(HOURS[-1] + 1) * per]
     has = win.any(1)
@@ -101,10 +112,11 @@ def _fmt_run(d0, days, di0, h0, di1, h1):
     return "%s %02dh -> %s %02dh" % (a, h0, b, h1)
 
 
-def _streaks(out, days=None, d0=0):
+def _streaks(out, days=None, d0=0, hours=None):
     """out (days, hours) int8: 1 win, -1 loss, 0 skipped (neither breaks nor extends a streak).
     -> (max streak inside a day, where, max streak chained over days, where). 'where' = first time it happened."""
     nd, k = out.shape
+    H = hours or HOURS
     if days is None:
         days = np.arange(nd)
     best_d, where_d = 0, ""
@@ -119,12 +131,12 @@ def _streaks(out, days=None, d0=0):
                     d_start = j
                 dc += 1
                 if dc > best_d:
-                    best_d, where_d = dc, _fmt_run(d0, days, i, HOURS[d_start], i, HOURS[j])
+                    best_d, where_d = dc, _fmt_run(d0, days, i, H[d_start], i, H[j])
                 if cc == 0:
                     c_start = (i, j)
                 cc += 1
                 if cc > best_c:
-                    best_c, where_c = cc, _fmt_run(d0, days, c_start[0], HOURS[c_start[1]], i, HOURS[j])
+                    best_c, where_c = cc, _fmt_run(d0, days, c_start[0], H[c_start[1]], i, H[j])
             elif v == 1:
                 dc = 0
                 cc = 0
@@ -135,21 +147,22 @@ MAXK = 3
 MODES = ["No-MTG", "MTG1", "MTG2", "MTG3"]
 
 
-def _pack(out, levels, skipped, days=None, d0=0):
+def _pack(out, levels, skipped, days=None, d0=0, hours=None):
     w = int((out == 1).sum())
     lo = int((out == -1).sum())
     n = w + lo
-    bd, wd, bc, wc = _streaks(out, days, d0)
+    bd, wd, bc, wc = _streaks(out, days, d0, hours)
     return dict(win=w, loss=lo, n=n, wr=(w / n if n else 0.0), levels=levels, skipped=skipped,
                 b2b_day=bd, b2b_day_at=wd, b2b_chain=bc, b2b_chain_at=wc)
 
 
-def minute_stats(dirm, val, tf, minute, days, d0=0):
+def minute_stats(dirm, val, tf, minute, days, d0=0, hours=None):
     """Statistics of the entry slot `minute` (0..59, multiple of tf) over the chosen days, for No-MTG and MTG1..MTG3.
     sides[G|R]['m'][k] = pack for MTG k (k = 0 means no MTG)."""
     per = 60 // tf
     S = 1440 // tf
     j = minute // tf
+    HOURS = hours or globals()["HOURS"]
     fd = np.concatenate((dirm.reshape(-1), np.zeros(MAXK, np.int8))).astype(np.int8)
     fv = np.concatenate((val.reshape(-1), np.zeros(MAXK, bool)))
     idx = days[:, None] * S + np.array([h * per + j for h in HOURS])[None, :]
@@ -181,7 +194,7 @@ def minute_stats(dirm, val, tf, minute, days, d0=0):
             out = np.zeros(e.shape, np.int8)
             out[wins] = 1
             out[alive_after[k]] = -1
-            modes[k] = _pack(out, [int(win_lv[lv].sum()) for lv in range(k + 1)], int(skipped.sum()), days, d0)
+            modes[k] = _pack(out, [int(win_lv[lv].sum()) for lv in range(k + 1)], int(skipped.sum()), days, d0, HOURS)
         res["sides"][name] = dict(m=modes)
     res["dominant"] = "G" if g >= r else "R"
     return res
@@ -195,12 +208,13 @@ def analyze(pair, ts, o, c, tf, months, minutes):
     if len(lt) == 0:
         return None
     d0, dirm, val = build_grid(lt, d, tf)
-    days = pick_days(dirm, val, tf, months)
+    hours = hours_for(pair)
+    days = pick_days(dirm, val, tf, months, hours)
     if len(days) == 0:
         return None
     mins = sorted(minutes)
-    return dict(pair=pair, tf=tf, months=months, d0=d0, dirm=dirm, val=val, days=days, minutes=mins,
-                stats=[minute_stats(dirm, val, tf, m, days, d0) for m in mins])
+    return dict(pair=pair, tf=tf, months=months, d0=d0, dirm=dirm, val=val, days=days, minutes=mins, hours=hours,
+                stats=[minute_stats(dirm, val, tf, m, days, d0, hours) for m in mins])
 
 
 def day_date(d0, i):
@@ -220,7 +234,7 @@ def make_csv(res, kmax=MAXK):
     w.writerow(["date", "weekday", "hour"] + ["%02d" % (k * tf) for k in range(per)])
     for i in res["days"]:
         dd = day_date(res["d0"], i)
-        for h in HOURS:
+        for h in res.get("hours", HOURS):
             w.writerow([dd.isoformat(), WD[dd.weekday()], "%02d" % h] +
                        [_letter(res["dirm"][i, h * per + k], res["val"][i, h * per + k]) for k in range(per)])
     s = io.StringIO()
@@ -255,6 +269,7 @@ def make_pdf(res, kmax=MAXK):
     page = landscape(A4)
     M = 20
     width = page[0] - 2 * M
+    HRS = res.get("hours", HOURS)
 
     class DayGrid(Flowable):
         RH, HH, TH, LW = 9.6, 10.5, 12.0, 26.0
@@ -263,7 +278,7 @@ def make_pdf(res, kmax=MAXK):
             super().__init__()
             self.i = i
             self.width = width
-            self.height = self.TH + self.HH + len(HOURS) * self.RH + 8
+            self.height = self.TH + self.HH + len(HRS) * self.RH + 8
 
         def draw(self):
             cv = self.canv
@@ -286,7 +301,7 @@ def make_pdf(res, kmax=MAXK):
                     cv.setFillColor(colors.white)
                 cv.drawCentredString(x + cw / 2, top - self.HH + 3, "%02d" % (k * tf))
             fs = min(7.0, cw * 0.66)
-            for r, h in enumerate(HOURS):
+            for r, h in enumerate(HRS):
                 y = top - self.HH - (r + 1) * self.RH
                 cv.setFillColor(LIGHT)
                 cv.rect(0, y, self.LW, self.RH, stroke=0, fill=1)
@@ -319,8 +334,8 @@ def make_pdf(res, kmax=MAXK):
     story = [Paragraph("%s  -  Engine 3 Minute Grid  (M%d)" % (pair, tf), h1)]
     dts = [day_date(res["d0"], i) for i in res["days"]]
     story.append(Paragraph(
-        "Period: %s to %s  (%d trading days, last %s)   |   Entry hours 12:00-23:59 BDT (UTC+6)   |   Entry minutes: %s" % (
-            dts[0], dts[-1], len(dts), period_label_en(res["months"]),
+        "Period: %s to %s  (%d trading days, last %s)   |   Entry hours %s BDT (UTC+6)   |   Entry minutes: %s" % (
+            dts[0], dts[-1], len(dts), period_label_en(res["months"]), hours_label(HRS),
             ", ".join(":%02d" % m for m in res["minutes"])), p9))
     story.append(Paragraph(
         "<b>How to read:</b> GREEN block = you trade GREEN at that minute, RED block = you trade RED. The light-green block is the colour that appears more often at that minute. "
