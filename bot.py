@@ -50,6 +50,8 @@ PARAMS = dict(min_wr=_f("MIN_WR", "0.80"), min_edge=_f("MIN_EDGE", "0.03"), z=_f
 SCAN_DAYS = int(_f("SCAN_DAYS", "400"))
 MAX_KEEP = int(_f("MAX_KEEP", "3000"))
 AUTO_SCAN_HOURS = _f("AUTO_SCAN_HOURS", "24")
+# Auto scan is OFF by default. Only runs if AUTO_SCAN=on is set in the environment.
+AUTO_SCAN = os.environ.get("AUTO_SCAN", "off").strip().lower() in ("on", "1", "true", "yes")
 WINDOWS = engine.WINDOWS_DEFAULT
 if os.environ.get("WINDOWS", "").strip():
     try:
@@ -1935,7 +1937,10 @@ async def post_init(app):
         log.error("DATABASE_URL_* missing")
     app.bot_data["alert_task"] = asyncio.create_task(live.alert_loop(send))
     app.bot_data["result_task"] = asyncio.create_task(live.result_loop(send))
-    app.bot_data["auto_scan_task"] = asyncio.create_task(auto_scan_loop(app))
+    if AUTO_SCAN:
+        app.bot_data["auto_scan_task"] = asyncio.create_task(auto_scan_loop(app))
+    else:
+        log.info("auto scan is OFF (set AUTO_SCAN=on to enable)")
     app.bot_data["radar_alert_task"] = asyncio.create_task(radar.alert_loop(send))
     app.bot_data["radar_result_task"] = asyncio.create_task(radar.result_loop(send))
     app.bot_data["radar_refresh_task"] = asyncio.create_task(radar.refresh_loop(e10_refresh))
