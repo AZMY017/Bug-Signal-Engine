@@ -1109,24 +1109,45 @@ async def e8_job(chat_id, prog, st):
     if not source.enabled():
         return await progress("❌ DATABASE_URL_1/2/3 সেট করা নেই (লাইভ বটের ক্যান্ডেল ডেটাবেজ)।")
     days = engine3.period_days(st["months"])
-    missing, texts = [], []
+    plist = list(st["pairs"])
+    total, sent_any = len(plist), False
+    missing = []
+    gate = asyncio.Semaphore(3)         # 3 pairs download + calculate at the same time (the wait is the database, not the CPU)
+
+    async def one(pair):
+        """Load + calculate one pair -> list of message texts (None when there is not enough data)."""
+        async with gate:
+            now = int(time.time())
+            ts, o, c = await asyncio.to_thread(source.load_oc, pair, now - (days + 10) * 86400, now + 86400)
+            res = await asyncio.to_thread(engine8.analyze, pair, ts, o, c, st["tf"], st["months"], st["minutes"])
+            del ts, o, c
+            if res is None:
+                return None
+            head = "📊 %s • %d মিনিট • %s • %d ট্রেডিং-দিন (%s → %s)" % (
+                pairs.pretty(pair), st["tf"], e3_label(st["months"]), len(res["days"]),
+                engine3.day_date(res["d0"], res["days"][0]), engine3.day_date(res["d0"], res["days"][-1]))
+            texts = engine8.messages(head, engine8.collect(res, st["mtg"]), E3_MTG)
+            del res
+            return texts
+
+    tasks = []
     try:
         async with SCAN_LOCK:       # same lock as /scan and /engine2 (Render's small RAM)
-            for i, pair in enumerate(st["pairs"]):
-                await progress("⏳ ইঞ্জিন ৮: %d/%d • %s" % (i + 1, len(st["pairs"]), pairs.pretty(pair)))
-                now = int(time.time())
-                ts, o, c = await asyncio.to_thread(source.load_oc, pair, now - (days + 10) * 86400, now + 86400)
-                res = await asyncio.to_thread(engine8.analyze, pair, ts, o, c, st["tf"], st["months"], st["minutes"])
-                if res is None:
+            await progress("⏳ ইঞ্জিন ৮: %d টা পেয়ার হিসাব হচ্ছে…" % total)
+            tasks = [asyncio.create_task(one(p)) for p in plist]
+            for i, (pair, tk) in enumerate(zip(plist, tasks)):
+                texts = await tk
+                if texts is None:
                     missing.append(pairs.pretty(pair))
-                    continue
-                head = "📊 %s • %d মিনিট • %s • %d ট্রেডিং-দিন (%s → %s)" % (
-                    pairs.pretty(pair), st["tf"], e3_label(st["months"]), len(res["days"]),
-                    engine3.day_date(res["d0"], res["days"][0]), engine3.day_date(res["d0"], res["days"][-1]))
-                texts.extend(engine8.messages(head, engine8.collect(res, st["mtg"]), E3_MTG))
-                del res
+                else:
+                    for t in texts:             # send this pair NOW, don't wait for the others
+                        await APP.bot.send_message(chat_id, t)
+                    sent_any = True
+                await progress("⏳ ইঞ্জিন ৮: %d/%d পেয়ার শেষ" % (i + 1, total))
     except Exception as e:  # noqa
         log.exception("engine8 failed")
+        for tk in tasks:
+            tk.cancel()
         return await progress("❌ ইঞ্জিন ৮ হয়নি: %s" % e)
     try:
         await prog.delete()
@@ -1134,10 +1155,8 @@ async def e8_job(chat_id, prog, st):
         pass
     if missing:
         await send(chat_id, "ডেটা নেই/কম: %s" % ", ".join(missing))
-    if not texts:
-        return await send(chat_id, "❌ ইঞ্জিন ৮: কোনো পেয়ারের ডেটা পাওয়া যায়নি।")
-    for t in texts:
-        await APP.bot.send_message(chat_id, t)
+    if not sent_any:
+        await send(chat_id, "❌ ইঞ্জিন ৮: কোনো পেয়ারের ডেটা পাওয়া যায়নি।")
 
 
 async def cmd_engine8(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
