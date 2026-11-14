@@ -89,3 +89,17 @@ async def fetch_dirs(pair, from_ts, to_ts):
         ts.append(t)
         d.append(1 if cl > o else (-1 if cl < o else 0))
     return np.array(ts, np.int64), np.array(d, np.int8)
+
+
+async def fetch_oc(pair, from_ts, to_ts):
+    """Completed M1 candles in [from_ts, to_ts) -> (ts int64, open float64, close float64). Needed by the Signal Radar,
+    because 3/5/... minute candles are built from the one-minute ones (same way as in the backtest)."""
+    data = await _get(pair, {"granularity": "M1", "price": "M", "from": _iso(from_ts), "to": _iso(to_ts)})
+    ts, o, c = [], [], []
+    for cd in data.get("candles", []):
+        if not cd.get("complete"):
+            continue
+        ts.append(calendar.timegm(time.strptime(cd["time"][:19], "%Y-%m-%dT%H:%M:%S")))
+        o.append(float(cd["mid"]["o"]))
+        c.append(float(cd["mid"]["c"]))
+    return np.array(ts, np.int64), np.array(o, np.float64), np.array(c, np.float64)

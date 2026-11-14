@@ -25,6 +25,7 @@ import engine8
 import engine9
 import live
 import oanda
+import radar
 import pairs
 import resultsdb as rdb
 import source
@@ -115,7 +116,7 @@ LEGEND = ("✅ = টেস্ট পিরিয়ডেও টিকেছে 
 
 
 def head_cmds():
-    return ("/check USDJPY 30 UP 12-24 — একটা নির্দিষ্ট স্লটের হিসাব\n/engine3 — ইঞ্জিন ৩ (মিনিট গ্রিড: G/R টেবিল + উইন রেশিও, PDF/CSV)\n/engine4 — ইঞ্জিন ৪ (ব্যাক-টু-ব্যাক লসের পর সিগন্যাল গোনা)\n/engine6 — ইঞ্জিন ৬ (ইঞ্জিন ৩-এর মতো, কিন্তু গ্রিন/রেড আলাদা চার্ট, একদিনের কম B2B লস আগে)\n/engine8 — ইঞ্জিন ৮ (ইঞ্জিন ৬-এর হিসাব, শুধু টেক্সট: গ্রিন/রেডের সর্বনিম্ন B2B লসের মিনিটগুলো)\n/engine9 — ইঞ্জিন ৯ (ইঞ্জিন ৮-এর মিনিটগুলো সরাসরি ইঞ্জিন ৪-এর সিগন্যাল গণনায়, শুধু টেক্সট)\n/live — লাইভ অ্যালার্ট চালু/বন্ধ\n/status — অবস্থা\n/data — ডেটা কভারেজ\n/id — আমার Telegram ID")
+    return ("/check USDJPY 30 UP 12-24 — একটা নির্দিষ্ট স্লটের হিসাব\n/engine3 — ইঞ্জিন ৩ (মিনিট গ্রিড: G/R টেবিল + উইন রেশিও, PDF/CSV)\n/engine4 — ইঞ্জিন ৪ (ব্যাক-টু-ব্যাক লসের পর সিগন্যাল গোনা)\n/engine6 — ইঞ্জিন ৬ (ইঞ্জিন ৩-এর মতো, কিন্তু গ্রিন/রেড আলাদা চার্ট, একদিনের কম B2B লস আগে)\n/engine8 — ইঞ্জিন ৮ (ইঞ্জিন ৬-এর হিসাব, শুধু টেক্সট: গ্রিন/রেডের সর্বনিম্ন B2B লসের মিনিটগুলো)\n/engine9 — ইঞ্জিন ৯ (ইঞ্জিন ৮-এর মিনিটগুলো সরাসরি ইঞ্জিন ৪-এর সিগন্যাল গণনায়, শুধু টেক্সট)\n/engine10 — ইঞ্জিন ১০ সিগন্যাল রাডার (১০০% উইনের স্লট থেকে লাইভ UP/DOWN অ্যালার্ট + রেজাল্ট)\n/live — লাইভ অ্যালার্ট চালু/বন্ধ\n/status — অবস্থা\n/data — ডেটা কভারেজ\n/id — আমার Telegram ID")
 
 
 # ---------------------------------------------------------------- scan
@@ -794,6 +795,7 @@ async def cmd_engine3(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E3["wait"] = False
     E6["wait"] = False
     E8["wait"] = False
+    E10["wait"] = False
     E9["wait"] = False
     await update.effective_message.reply_text(e3_text(), reply_markup=e3_kb())
 
@@ -808,6 +810,8 @@ async def on_e3_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return await on_e8_text(update, ctx)
     if E9["wait"]:
         return await on_e9_text(update, ctx)
+    if E10["wait"]:
+        return await on_e10_text(update, ctx)
     if not E3["wait"]:
         return
     months = e3_parse_period(update.effective_message.text or "")
@@ -845,6 +849,7 @@ async def on_e3_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             E3["wait"] = True
             E6["wait"] = False
             E8["wait"] = False
+            E10["wait"] = False
             E9["wait"] = False
             await q.message.reply_text(
                 "✏️ কত দিনের ব্যাক-টেস্ট চাও লেখো:\n• মাস: 7 অথবা 7M\n• দিন: 45D\n• বছর: 1Y\n(সর্বোচ্চ %d দিন)" % E3_MAX_DAYS)
@@ -978,6 +983,7 @@ async def cmd_engine6(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E6["page"] = "main"
     E6["wait"] = False
     E8["wait"] = False
+    E10["wait"] = False
     E9["wait"] = False
     E3["wait"] = False
     await update.effective_message.reply_text(e6_text(), reply_markup=e6_kb())
@@ -1011,12 +1017,14 @@ async def on_e6_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             E6["wait"] = True
             E3["wait"] = False
             E8["wait"] = False
+            E10["wait"] = False
             E9["wait"] = False
             await q.message.reply_text(
                 "✏️ কত দিনের ব্যাক-টেস্ট চাও লেখো:\n• মাস: 7 অথবা 7M\n• দিন: 45D\n• বছর: 1Y\n(সর্বোচ্চ %d দিন)" % E3_MAX_DAYS)
             return
         E6["wait"] = False
         E8["wait"] = False
+        E10["wait"] = False
         E9["wait"] = False
         E6["months"] = int(val)
     elif key == "out":
@@ -1051,6 +1059,7 @@ async def on_e6_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E6["months"] = months
     E6["wait"] = False
     E8["wait"] = False
+    E10["wait"] = False
     E9["wait"] = False
     E6["page"] = "main"
     await update.effective_message.reply_text(e6_text(), reply_markup=e6_kb())
@@ -1178,6 +1187,7 @@ async def cmd_engine8(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E3["wait"] = False
     E6["wait"] = False
     E8["wait"] = False
+    E10["wait"] = False
     E9["wait"] = False
     await update.effective_message.reply_text(e8_text(), reply_markup=e8_kb())
 
@@ -1215,6 +1225,7 @@ async def on_e8_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "✏️ কত দিনের ব্যাক-টেস্ট চাও লেখো:\n• মাস: 7 অথবা 7M\n• দিন: 45D\n• বছর: 1Y\n(সর্বোচ্চ %d দিন)" % E3_MAX_DAYS)
             return
         E8["wait"] = False
+        E10["wait"] = False
         E9["wait"] = False
         E8["months"] = int(val)
     elif key == "mtg":
@@ -1246,6 +1257,7 @@ async def on_e8_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return await update.effective_message.reply_text("বুঝিনি। এভাবে লেখো: 7 / 7M / 45D / 1Y (১–%d দিনের মধ্যে)" % E3_MAX_DAYS)
     E8["months"] = months
     E8["wait"] = False
+    E10["wait"] = False
     E9["wait"] = False
     E8["page"] = "main"
     await update.effective_message.reply_text(e8_text(), reply_markup=e8_kb())
@@ -1361,6 +1373,7 @@ async def cmd_engine9(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E3["wait"] = False
     E6["wait"] = False
     E8["wait"] = False
+    E10["wait"] = False
     E9["wait"] = False
     await update.effective_message.reply_text(e9_text(), reply_markup=e9_kb())
 
@@ -1392,6 +1405,7 @@ async def on_e9_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             E3["wait"] = False
             E6["wait"] = False
             E8["wait"] = False
+            E10["wait"] = False
             await q.message.reply_text("✏️ টাইম ফ্রেম কত মিনিট চাও লেখো (যেমন: 2, 3, 4, 5, 10, 15)।\nসংখ্যাটা ৬০-কে ভাগ করতে পারে এমন হতে হবে।")
             return
         E9["wait"] = False
@@ -1402,6 +1416,7 @@ async def on_e9_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             E3["wait"] = False
             E6["wait"] = False
             E8["wait"] = False
+            E10["wait"] = False
             await q.message.reply_text(
                 "✏️ কত দিনের ব্যাক-টেস্ট চাও লেখো:\n• মাস: 7 অথবা 7M\n• দিন: 45D\n• বছর: 1Y\n(সর্বোচ্চ %d দিন)" % E3_MAX_DAYS)
             return
@@ -1444,6 +1459,220 @@ async def on_e9_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E9["wait"] = False
     E9["page"] = "main"
     await update.effective_message.reply_text(e9_text(), reply_markup=e9_kb())
+
+
+# ---------------------------------------------------------------- /engine10  (Signal Radar: Engine 9's 100% slots -> live UP/DOWN alerts)
+E10 = dict(tf=1, months=4, mtg=[1], n=3, mode="exact", minsig=3, pairs=[], page="main", wait=False)   # wait: False | "months" | "tf" | "minsig"
+E10_TF_PRESETS = (1, 3, 5)
+E10_MINSIG_PRESETS = (1, 3, 5)
+
+
+def e10_text():
+    ps = ", ".join(pairs.pretty(p) for p in E10["pairs"]) or "— (বাছাই করোনি)"
+    st, cf = radar.state(), radar.cfg()
+    if st["rules"]:
+        when = dt.datetime.fromtimestamp(st["built_at"], pairs.BDT).strftime("%d %b %H:%M")
+        w, l, u, o = radar.tally(live.day_start(time.time()))
+        radar_line = "📡 রাডার: %s • তালিকায় %d স্লট (বানানো %s) • আজ ✅ %d ❌ %d" % ("চালু ✅" if cf["on"] else "বন্ধ ⏸", len(st["rules"]), when, w, l)
+    else:
+        radar_line = "📡 রাডার: %s • তালিকা এখনও বানানো হয়নি" % ("চালু ✅" if cf["on"] else "বন্ধ ⏸")
+    return ("🎯 ইঞ্জিন ১০ — সিগন্যাল রাডার\n\n"
+            "ইঞ্জিন ৯-এর হিসাবে যে মিনিটে উইন ১০০%% (কমপক্ষে %d টা সিগন্যালসহ), সেগুলো রাডার তালিকায় যায়। লাইভে ওই মিনিটের আগের ঘণ্টাগুলোতে পরপর %d লস গেলে পরের ঘণ্টার স্লটের ৪৫ সেকেন্ড আগে UP/DOWN সিগন্যাল আসে, তারপর WIN/LOSS রেজাল্ট।\n\n"
+            "⚙️ সেটিং:\n• টাইম ফ্রেম: %d মিনিট\n• সময়কাল: %s\n• MTG: %s\n• ব্যাক-টু-ব্যাক লস: %d টা (%s)\n• ন্যূনতম সিগন্যাল: %d\n• পেয়ার: %s\n\n%s\n"
+            "(তালিকা প্রতিদিন ১১:৩০-এর পর নিজে নতুন হয়, রাডার চালু থাকলে)" % (
+                E10["minsig"], E10["n"], E10["tf"], e3_label(E10["months"]),
+                (" + ".join(E3_MTG[v] for v in sorted(E10["mtg"])) or "— (বাছাই করোনি)"), E10["n"], E4_MODE[E10["mode"]], E10["minsig"], ps, radar_line))
+
+
+def e10_kb():
+    tick = e8_tick
+    if E10["page"] == "pairs":
+        rows, cur = [], []
+        for p in pairs.PAIRS:
+            cur.append(Btn(tick(p in E10["pairs"], pairs.pretty(p)), callback_data="e10:tp:%s" % p))
+            if len(cur) == 3:
+                rows.append(cur)
+                cur = []
+        if cur:
+            rows.append(cur)
+        rows.append([Btn("সব পেয়ার", callback_data="e10:pall:0"), Btn("পরিষ্কার", callback_data="e10:pclr:0"), Btn("⬅️ ফিরে", callback_data="e10:pg:main")])
+        return Markup(rows)
+    on = radar.cfg()["on"]
+    return Markup([
+        [Btn(tick(E10["tf"] == v, "%d মিনিট" % v), callback_data="e10:tf:%d" % v) for v in E10_TF_PRESETS]
+        + [Btn(tick(E10["tf"] not in E10_TF_PRESETS, "✏️ %d মিনিট" % E10["tf"] if E10["tf"] not in E10_TF_PRESETS else "✏️"), callback_data="e10:tf:custom")],
+        [Btn(tick(E10["months"] == v, "%dM" % v), callback_data="e10:mo:%d" % v) for v in E3_PRESETS]
+        + [Btn(tick(E10["months"] not in E3_PRESETS, "✏️ " + e3_label(E10["months"]) if E10["months"] not in E3_PRESETS else "✏️"), callback_data="e10:mo:custom")],
+        [Btn(tick(v in E10["mtg"], lb), callback_data="e10:mtg:%d" % v) for v, lb in E3_MTG.items()],
+        [Btn(tick(E10["n"] == v, "লস %d" % v), callback_data="e10:n:%d" % v) for v in range(1, 7)],
+        [Btn(tick(E10["mode"] == v, lb), callback_data="e10:md:%s" % v) for v, lb in E4_MODE.items()],
+        [Btn(tick(E10["minsig"] == v, "সিগন্যাল ≥%d" % v), callback_data="e10:ms:%d" % v) for v in E10_MINSIG_PRESETS]
+        + [Btn(tick(E10["minsig"] not in E10_MINSIG_PRESETS, "✏️ ≥%d" % E10["minsig"] if E10["minsig"] not in E10_MINSIG_PRESETS else "✏️"), callback_data="e10:ms:custom")],
+        [Btn("💱 পেয়ার (%d)" % len(E10["pairs"]), callback_data="e10:pg:pairs")],
+        [Btn("🔄 তালিকা বানাও", callback_data="e10:build:0"), Btn("📋 তালিকা দেখো", callback_data="e10:show:0")],
+        [Btn("⏸ রাডার বন্ধ করো" if on else "📡 রাডার চালু করো", callback_data="e10:tg:0")]])
+
+
+def e10_settings():
+    return dict(tf=E10["tf"], months=E10["months"], months_label=e3_label(E10["months"]), mtg=sorted(E10["mtg"]), n=E10["n"],
+                mode=E10["mode"], minsig=E10["minsig"], pairs=list(E10["pairs"]))
+
+
+async def e10_build(chat_id, prog, st, auto=False):
+    """Builds the radar list (Neon is read here, once) and saves it; prog is None for the daily automatic rebuild."""
+    async def progress(i, n):
+        if prog:
+            try:
+                await prog.edit_text("⏳ ইঞ্জিন ১০: %d/%d পেয়ার শেষ" % (i, n))
+            except BadRequest:
+                pass
+    async with SCAN_LOCK:
+        per = await radar.build(st, progress)
+    rules = [r for e in per if e for r in e["rules"]]
+    await radar.set_rules(rules, st)
+    if prog:
+        try:
+            await prog.delete()
+        except Exception:  # noqa
+            pass
+    texts = radar.summary_text(per, st, E3_MTG)
+    if auto:
+        texts[0] = "🔄 রাডার তালিকা আজকের জন্য নতুন হলো\n\n" + texts[0]
+    for t in texts:
+        await send(chat_id, t[:4000])
+
+
+async def e10_refresh():
+    """Daily automatic rebuild with the saved settings (called by radar.refresh_loop)."""
+    chat = radar.cfg()["chat"]
+    st = radar.state()["meta"]
+    if not chat or not st.get("pairs") or SCAN_LOCK.locked() or not source.enabled():
+        return
+    await e10_build(chat, None, st, auto=True)
+
+
+async def cmd_engine10(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return await deny(update)
+    only = [p for p in (pairs.norm(t) for a in (ctx.args or []) for t in a.replace(",", " ").split()) if p]
+    if only:
+        E10["pairs"] = list(dict.fromkeys(only))
+    E10["page"] = "main"
+    E3["wait"] = False
+    E6["wait"] = False
+    E8["wait"] = False
+    E9["wait"] = False
+    E10["wait"] = False
+    await update.effective_message.reply_text(e10_text(), reply_markup=e10_kb())
+
+
+async def on_e10_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    if not allowed(update):
+        return await q.answer("অনুমতি নেই", show_alert=True)
+    parts = q.data.split(":")
+    key, val = parts[1], parts[2]
+    if key == "build":
+        if not source.enabled():
+            return await q.answer("DATABASE_URL_1/2/3 সেট করা নেই", show_alert=True)
+        if not E10["pairs"]:
+            return await q.answer("আগে অন্তত একটা পেয়ার বাছো", show_alert=True)
+        if not E10["mtg"]:
+            return await q.answer("অন্তত একটা MTG অপশন বাছো", show_alert=True)
+        if SCAN_LOCK.locked():
+            return await q.answer("একটা স্ক্যান চলছে, শেষ হলে চাপো।", show_alert=True)
+        await q.answer("শুরু হচ্ছে…")
+        prog = await q.message.reply_text("⏳ ইঞ্জিন ১০: তালিকা বানানো শুরু…")
+
+        async def run():
+            try:
+                await e10_build(q.message.chat_id, prog, e10_settings())
+                if radar.cfg()["on"]:
+                    await radar.set_cfg(chat=q.message.chat_id)
+            except Exception as e:  # noqa
+                log.exception("engine10 build failed")
+                try:
+                    await prog.edit_text("❌ ইঞ্জিন ১০ হয়নি: %s" % e)
+                except Exception:  # noqa
+                    pass
+        ctx.application.bot_data["e10_job"] = asyncio.create_task(run())
+        return
+    if key == "show":
+        await q.answer()
+        for t in [radar.list_text(E3_MTG)]:
+            await q.message.reply_text(t)
+        return
+    if key == "tg":
+        if not radar.cfg()["on"] and not radar.state()["rules"]:
+            return await q.answer("আগে 🔄 তালিকা বানাও", show_alert=True)
+        if not radar.cfg()["on"] and not oanda.KEY:
+            return await q.answer("OANDA key সেট করা নেই — লাইভ ক্যান্ডেল পাওয়া যাবে না", show_alert=True)
+        await radar.set_cfg(on=not radar.cfg()["on"], chat=q.message.chat_id)
+        await q.answer("রাডার চালু ✅" if radar.cfg()["on"] else "রাডার বন্ধ ⏸")
+    else:
+        await q.answer()
+    if key == "pg":
+        E10["page"] = val
+    elif key in ("tf", "mo", "ms") and val == "custom":
+        E10["wait"] = {"tf": "tf", "mo": "months", "ms": "minsig"}[key]
+        E3["wait"] = False
+        E6["wait"] = False
+        E8["wait"] = False
+        E9["wait"] = False
+        ask = {"tf": "✏️ টাইম ফ্রেম কত মিনিট চাও লেখো (যেমন: 2, 3, 4, 5, 10, 15)।\nসংখ্যাটা ৬০-কে ভাগ করতে পারে এমন হতে হবে।",
+               "mo": "✏️ কত দিনের ব্যাক-টেস্ট চাও লেখো:\n• মাস: 7 অথবা 7M\n• দিন: 45D\n• বছর: 1Y\n(সর্বোচ্চ %d দিন)" % E3_MAX_DAYS,
+               "ms": "✏️ রাডারে ঢুকতে একটা মিনিটে কমপক্ষে কয়টা সিগন্যাল লাগবে লেখো (১ থেকে ৫০)।"}[key]
+        await q.message.reply_text(ask)
+        return
+    elif key == "tf":
+        E10["wait"] = False
+        E10["tf"] = int(val)
+    elif key == "mo":
+        E10["wait"] = False
+        E10["months"] = int(val)
+    elif key == "ms":
+        E10["wait"] = False
+        E10["minsig"] = int(val)
+    elif key == "mtg":
+        v = int(val)
+        E10["mtg"] = [x for x in E10["mtg"] if x != v] if v in E10["mtg"] else sorted(E10["mtg"] + [v])
+    elif key == "n":
+        E10["n"] = int(val)
+    elif key == "md":
+        E10["mode"] = val
+    elif key == "tp":
+        E10["pairs"] = [p for p in E10["pairs"] if p != val] if val in E10["pairs"] else E10["pairs"] + [val]
+    elif key == "pall":
+        E10["pairs"] = list(pairs.PAIRS)
+    elif key == "pclr":
+        E10["pairs"] = []
+    try:
+        await q.edit_message_text(e10_text(), reply_markup=e10_kb())
+    except BadRequest:
+        pass
+
+
+async def on_e10_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Reply to a ✏️ prompt of /engine10 (called from on_e3_text): period, time frame or minimum signals."""
+    txt = (update.effective_message.text or "").strip().translate(str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789"))
+    w = E10["wait"]
+    if w == "tf":
+        t = txt.lower().replace("মিনিট", "").replace("min", "").replace("m", "").strip()
+        if not t.isdigit() or not (1 <= int(t) <= 30) or 60 % int(t):
+            return await update.effective_message.reply_text("বুঝিনি। এমন একটা সংখ্যা লেখো যেটা ৬০-কে ভাগ করে: 1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30")
+        E10["tf"] = int(t)
+    elif w == "minsig":
+        if not txt.isdigit() or not (1 <= int(txt) <= 50):
+            return await update.effective_message.reply_text("বুঝিনি। ১ থেকে ৫০-এর মধ্যে একটা সংখ্যা লেখো।")
+        E10["minsig"] = int(txt)
+    else:
+        months = e3_parse_period(txt)
+        if months is None:
+            return await update.effective_message.reply_text("বুঝিনি। এভাবে লেখো: 7 / 7M / 45D / 1Y (১–%d দিনের মধ্যে)" % E3_MAX_DAYS)
+        E10["months"] = months
+    E10["wait"] = False
+    E10["page"] = "main"
+    await update.effective_message.reply_text(e10_text(), reply_markup=e10_kb())
 
 
 # ---------------------------------------------------------------- /engine4  (Loss-streak signal finder)
@@ -1657,6 +1886,7 @@ async def post_init(app):
             BotCommand("engine6", "ইঞ্জিন ৬: গ্রিন/রেড র‍্যাংকড চার্ট (একদিনের কম B2B লস আগে)"),
             BotCommand("engine8", "ইঞ্জিন ৮: সর্বনিম্ন B2B লসের মিনিট টেক্সটে (গ্রিন/রেড)"),
             BotCommand("engine9", "ইঞ্জিন ৯: ইঞ্জিন ৮ এর মিনিট সরাসরি ইঞ্জিন ৪ এ (টেক্সট)"),
+            BotCommand("engine10", "ইঞ্জিন ১০: সিগন্যাল রাডার (১০০% স্লটের লাইভ UP/DOWN অ্যালার্ট)"),
             BotCommand("live", "লাইভ অ্যালার্ট"), BotCommand("status", "অবস্থা"), BotCommand("data", "ডেটা কভারেজ"), BotCommand("check", "একটা স্লটের হিসাব দেখো"),
             BotCommand("id", "আমার Telegram ID")]
     try:
@@ -1667,6 +1897,7 @@ async def post_init(app):
         try:
             await asyncio.to_thread(rdb.init)
             await live.load_state()
+            await radar.load_state()
         except Exception:  # noqa
             log.exception("results database init failed")
     else:
@@ -1676,6 +1907,9 @@ async def post_init(app):
     app.bot_data["alert_task"] = asyncio.create_task(live.alert_loop(send))
     app.bot_data["result_task"] = asyncio.create_task(live.result_loop(send))
     app.bot_data["auto_scan_task"] = asyncio.create_task(auto_scan_loop(app))
+    app.bot_data["radar_alert_task"] = asyncio.create_task(radar.alert_loop(send))
+    app.bot_data["radar_result_task"] = asyncio.create_task(radar.result_loop(send))
+    app.bot_data["radar_refresh_task"] = asyncio.create_task(radar.refresh_loop(e10_refresh))
 
 
 class Health(BaseHTTPRequestHandler):
@@ -1719,6 +1953,7 @@ def main():
     app.add_handler(CommandHandler("engine6", cmd_engine6))
     app.add_handler(CommandHandler("engine8", cmd_engine8))
     app.add_handler(CommandHandler("engine9", cmd_engine9))
+    app.add_handler(CommandHandler("engine10", cmd_engine10))
     app.add_handler(CommandHandler("id", cmd_id))
     app.add_handler(CallbackQueryHandler(on_live_cb, pattern=r"^lv:"))
     app.add_handler(CallbackQueryHandler(on_e3_cb, pattern=r"^e3:"))
@@ -1727,6 +1962,7 @@ def main():
     app.add_handler(CallbackQueryHandler(on_e6_cb, pattern=r"^e6:"))
     app.add_handler(CallbackQueryHandler(on_e8_cb, pattern=r"^e8:"))
     app.add_handler(CallbackQueryHandler(on_e9_cb, pattern=r"^e9:"))
+    app.add_handler(CallbackQueryHandler(on_e10_cb, pattern=r"^e10:"))
     app.run_polling(drop_pending_updates=True)
 
 
