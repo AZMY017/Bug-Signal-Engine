@@ -7,3 +7,8 @@
 `resultsdb.py` (ইঞ্জিনের নিজের ডেটাবেজ) • `live.py` (লাইভ অ্যালার্ট) • `engine3.py` (ইঞ্জিন ৩: মিনিট গ্রিড, PDF/CSV) • `pairs.py` (পেয়ার/ডেটাবেজ ভাগ, লাইভ বটের সাথে হুবহু এক)
 
 Render: Build `pip install -r requirements.txt` • Start `python bot.py`
+
+
+## OTC market
+Engines 3/4/6/8/9/10 have a Real / OTC switch. OTC candles are read (read-only) from the OTC-MARKET-FUTURE-SIGNAL-BOT databases:
+set `OTC_DATABASE_URL_1/2/3` (same links, same order as that bot's `DATABASE_URL_1/2/3`). OTC has no live candles, so the live radar alerts stay real-market only.

@@ -381,6 +381,7 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return await deny(update)
     L = []
     L.append("ক্যান্ডেল ডেটাবেজ (পড়ার জন্য): %s" % ("%d টা" % len(source.URLS) if source.enabled() else "❌ সেট করা নেই"))
+    L.append("OTC ক্যান্ডেল ডেটাবেজ (পড়ার জন্য): %s" % ("%d টা" % len(source.OTC_URLS) if source.otc_enabled() else "❌ সেট করা নেই"))
     L.append("রেজাল্ট ডেটাবেজ: %s" % ("✅" if rdb.enabled() else "❌ সেট করা নেই"))
     L.append("OANDA (লাইভ অ্যালার্টের ক্যান্ডেল): %s • রিকোয়েস্ট এই সেশনে %d টা%s" % (
         "✅" if oanda.enabled() else "❌ OANDA_KEY নেই", live.DIAG["requests"],
@@ -414,11 +415,14 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def cmd_data(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return await deny(update)
-    if not source.enabled():
+    otc = bool(ctx.args) and ctx.args[0].lower() == "otc"
+    if otc and not source.otc_enabled():
+        return await update.effective_message.reply_text("OTC_DATABASE_URL_* সেট করা নেই।")
+    if not otc and not source.enabled():
         return await update.effective_message.reply_text("DATABASE_URL_* সেট করা নেই।")
     msg = await update.effective_message.reply_text("ডেটা দেখছি…")
-    L = []
-    for p in pairs.PAIRS:
+    L = ["🧪 OTC মার্কেট ডেটা:"] if otc else []
+    for p in (pairs.OTC_PAIRS if otc else pairs.PAIRS):
         try:
             lo, hi = await asyncio.to_thread(source.bounds, p)
         except Exception as e:  # noqa
@@ -484,6 +488,53 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ---------------------------------------------------------------- /engine2  (Back Signal Discovery)
+
+# ---------------------------------------------------------------- market switch (Real / OTC) shared by /engine3 4 6 8 9 10
+def mkt_row(tag, st):
+    return [Btn(("✅ " if st.get("mkt", "real") == v else "") + lb, callback_data="%s:mk:%s" % (tag, v))
+            for v, lb in (("real", "🌍 রিয়েল মার্কেট"), ("otc", "🧪 OTC মার্কেট"))]
+
+
+def with_market(tag, st):
+    """Decorator for eN_kb(): puts the Real / OTC buttons on top of the main page."""
+    def deco(fn):
+        def inner():
+            kb = fn()
+            if st.get("page", "main") != "main":
+                return kb
+            return Markup([mkt_row(tag, st)] + [list(r) for r in kb.inline_keyboard])
+        inner.__name__ = fn.__name__
+        return inner
+    return deco
+
+
+def with_market_text(st, tag=None):
+    """Decorator for eN_text(): adds the market line at the end."""
+    def deco(fn):
+        def inner():
+            t = fn()
+            if st.get("mkt", "real") == "otc":
+                t += ("\n\n🧪 মার্কেট: OTC — ডেটা OTC Neon ডাটাবেজ থেকে (একদিন আগের পর্যন্ত, লাইভ ডেটা নেই)।"
+                      "\nপেয়ার বাছাই করার আগে মার্কেট ঠিক আছে কি না দেখে নাও।")
+                if tag == "e10":
+                    t += "\nOTC-তে শুধু মিনিটের তালিকা/PDF/CSV হয় — লাইভ অ্যালার্ট শুধু রিয়েল মার্কেটে।"
+            else:
+                t += "\n\n🌍 মার্কেট: রিয়েল"
+            return t
+        inner.__name__ = fn.__name__
+        return inner
+    return deco
+
+
+def data_missing(plist):
+    """None when every database the pairs need is configured, else a Bengali message."""
+    if any(not pairs.is_otc(p) for p in plist) and not source.enabled():
+        return "DATABASE_URL_1/2/3 সেট করা নেই (রিয়েল মার্কেটের ক্যান্ডেল ডেটাবেজ)।"
+    if any(pairs.is_otc(p) for p in plist) and not source.otc_enabled():
+        return "OTC_DATABASE_URL_1/2/3 সেট করা নেই (OTC মার্কেটের ক্যান্ডেল ডেটাবেজ)।"
+    return None
+
+
 E2 = dict(months=12, side="BOTH", mtg="BOTH", acc=0.80, nmin=300)
 E2_PAYOUT = _f("E2_PAYOUT", "0.85")      # broker payout, 0.85 = 85%
 E2_MULT = _f("E2_MTG_MULT", "2.2")        # stake multiplier of the MTG step (for the EV number)
@@ -659,7 +710,7 @@ async def on_e2_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ---------------------------------------------------------------- /engine3  (Minute Grid: G/R table + win ratio, PDF / CSV)
-E3 = dict(tf=1, months=3, out="PDF", mtg=3, pairs=[], minutes=[], page="main", wait=False)
+E3 = dict(mkt="real", tf=1, months=3, out="PDF", mtg=3, pairs=[], minutes=[], page="main", wait=False)
 E3_MTG = {0: "নন-MTG", 1: "MTG1", 2: "MTG2", 3: "MTG3"}
 E3_MONTHS = {1: "1M", 2: "2M", 3: "3M", 6: "6M", 12: "1Y"}
 E3_OUT = {"PDF": "PDF", "CSV": "CSV", "BOTH": "দুটোই"}
@@ -697,6 +748,7 @@ def e3_parse_period(txt):
     return days // 30 if days % 30 == 0 else days / 30.0
 
 
+@with_market_text(E3, "e3")
 def e3_text():
     ps = ", ".join(pairs.pretty(p) for p in E3["pairs"]) or "— (বাছাই করোনি)"
     ms = " ".join(":%02d" % m for m in sorted(E3["minutes"])) or "— (বাছাই করোনি)"
@@ -707,12 +759,13 @@ def e3_text():
                 E3["tf"], e3_label(E3["months"]), E3_OUT[E3["out"]], E3_MTG[E3["mtg"]], ps, ms))
 
 
+@with_market("e3", E3)
 def e3_kb():
     def tick(on, label):
         return ("✅ " if on else "") + label
     if E3["page"] == "pairs":
         rows, cur = [], []
-        for p in pairs.PAIRS:
+        for p in pairs.plist(E3.get("mkt")):
             cur.append(Btn(tick(p in E3["pairs"], pairs.pretty(p)), callback_data="e3:tp:%s" % p))
             if len(cur) == 3:
                 rows.append(cur)
@@ -748,8 +801,9 @@ async def e3_job(chat_id, prog, st):
             await prog.edit_text(t)
         except BadRequest:
             pass
-    if not source.enabled():
-        return await progress("❌ DATABASE_URL_1/2/3 সেট করা নেই (লাইভ বটের ক্যান্ডেল ডেটাবেজ)।")
+    _miss = data_missing(st["pairs"])
+    if _miss:
+        return await progress("❌ " + _miss)
     days = engine3.period_days(st["months"])
     stamp = dt.datetime.now(pairs.BDT).strftime("%Y%m%d_%H%M")
     missing = []
@@ -794,6 +848,7 @@ async def cmd_engine3(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     only = [p for p in (pairs.norm(t) for a in (ctx.args or []) for t in a.replace(",", " ").split()) if p]
     if only:
         E3["pairs"] = list(dict.fromkeys(only))
+        E3["mkt"] = "otc" if pairs.is_otc(only[0]) else "real"
     E3["page"] = "main"
     E3["wait"] = False
     E6["wait"] = False
@@ -842,7 +897,11 @@ async def on_e3_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ctx.application.bot_data["e3_job"] = asyncio.create_task(e3_job(q.message.chat_id, prog, st))
         return
     await q.answer()
-    if key == "pg":
+    if key == "mk":
+        E3["mkt"] = "otc" if val == "otc" else "real"
+        E3["pairs"] = []
+        E3["page"] = "main"
+    elif key == "pg":
         E3["page"] = val
     elif key == "tf":
         E3["tf"] = int(val)
@@ -866,7 +925,7 @@ async def on_e3_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif key == "tp":
         E3["pairs"] = [p for p in E3["pairs"] if p != val] if val in E3["pairs"] else E3["pairs"] + [val]
     elif key == "pall":
-        E3["pairs"] = list(pairs.PAIRS)
+        E3["pairs"] = list(pairs.plist(E3.get("mkt")))
     elif key == "pclr":
         E3["pairs"] = []
     elif key == "tm":
@@ -883,9 +942,10 @@ async def on_e3_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ---------------------------------------------------------------- /engine6  (Ranked Minute Charts: like engine3, but GREEN / RED charts per mode ranked by lowest one-day B2B loss)
-E6 = dict(tf=1, months=3, out="PDF", mtg=[0], pairs=[], minutes=[], page="main", wait=False)
+E6 = dict(mkt="real", tf=1, months=3, out="PDF", mtg=[0], pairs=[], minutes=[], page="main", wait=False)
 
 
+@with_market_text(E6, "e6")
 def e6_text():
     ps = ", ".join(pairs.pretty(p) for p in E6["pairs"]) or "— (বাছাই করোনি)"
     ms = " ".join(":%02d" % m for m in sorted(E6["minutes"])) or "— (বাছাই করোনি)"
@@ -896,12 +956,13 @@ def e6_text():
                 E6["tf"], e3_label(E6["months"]), E3_OUT[E6["out"]], (" + ".join(E3_MTG[v] for v in sorted(E6["mtg"])) or "— (বাছাই করোনি)"), ps, ms))
 
 
+@with_market("e6", E6)
 def e6_kb():
     def tick(on, label):
         return ("✅ " if on else "") + label
     if E6["page"] == "pairs":
         rows, cur = [], []
-        for p in pairs.PAIRS:
+        for p in pairs.plist(E6.get("mkt")):
             cur.append(Btn(tick(p in E6["pairs"], pairs.pretty(p)), callback_data="e6:tp:%s" % p))
             if len(cur) == 3:
                 rows.append(cur)
@@ -937,8 +998,9 @@ async def e6_job(chat_id, prog, st):
             await prog.edit_text(t)
         except BadRequest:
             pass
-    if not source.enabled():
-        return await progress("❌ DATABASE_URL_1/2/3 সেট করা নেই (লাইভ বটের ক্যান্ডেল ডেটাবেজ)।")
+    _miss = data_missing(st["pairs"])
+    if _miss:
+        return await progress("❌ " + _miss)
     days = engine3.period_days(st["months"])
     stamp = dt.datetime.now(pairs.BDT).strftime("%Y%m%d_%H%M")
     missing = []
@@ -983,6 +1045,7 @@ async def cmd_engine6(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     only = [p for p in (pairs.norm(t) for a in (ctx.args or []) for t in a.replace(",", " ").split()) if p]
     if only:
         E6["pairs"] = list(dict.fromkeys(only))
+        E6["mkt"] = "otc" if pairs.is_otc(only[0]) else "real"
     E6["page"] = "main"
     E6["wait"] = False
     E8["wait"] = False
@@ -1010,7 +1073,11 @@ async def on_e6_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ctx.application.bot_data["e6_job"] = asyncio.create_task(e6_job(q.message.chat_id, prog, st))
         return
     await q.answer()
-    if key == "pg":
+    if key == "mk":
+        E6["mkt"] = "otc" if val == "otc" else "real"
+        E6["pairs"] = []
+        E6["page"] = "main"
+    elif key == "pg":
         E6["page"] = val
     elif key == "tf":
         E6["tf"] = int(val)
@@ -1038,7 +1105,7 @@ async def on_e6_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif key == "tp":
         E6["pairs"] = [p for p in E6["pairs"] if p != val] if val in E6["pairs"] else E6["pairs"] + [val]
     elif key == "pall":
-        E6["pairs"] = list(pairs.PAIRS)
+        E6["pairs"] = list(pairs.plist(E6.get("mkt")))
     elif key == "pclr":
         E6["pairs"] = []
     elif key == "tm":
@@ -1071,13 +1138,14 @@ async def on_e6_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ---------------------------------------------------------------- /engine8  (Engine 6's lowest-B2B minutes, sent as plain Telegram text instead of a PDF)
-E8 = dict(tf=1, months=3, mtg=[1], pairs=[], minutes=[], page="main", wait=False)
+E8 = dict(mkt="real", tf=1, months=3, mtg=[1], pairs=[], minutes=[], page="main", wait=False)
 
 
 def e8_tick(on, label):
     return ("✅ " if on else "") + label
 
 
+@with_market_text(E8, "e8")
 def e8_text():
     ps = ", ".join(pairs.pretty(p) for p in E8["pairs"]) or "— (বাছাই করোনি)"
     ms = " ".join(":%02d" % m for m in sorted(E8["minutes"])) or "— (বাছাই করোনি)"
@@ -1088,11 +1156,12 @@ def e8_text():
                 E8["tf"], e3_label(E8["months"]), (" + ".join(E3_MTG[v] for v in sorted(E8["mtg"])) or "— (বাছাই করোনি)"), ps, ms))
 
 
+@with_market("e8", E8)
 def e8_kb():
     tick = e8_tick
     if E8["page"] == "pairs":
         rows, cur = [], []
-        for p in pairs.PAIRS:
+        for p in pairs.plist(E8.get("mkt")):
             cur.append(Btn(tick(p in E8["pairs"], pairs.pretty(p)), callback_data="e8:tp:%s" % p))
             if len(cur) == 3:
                 rows.append(cur)
@@ -1127,8 +1196,9 @@ async def e8_job(chat_id, prog, st):
             await prog.edit_text(t)
         except BadRequest:
             pass
-    if not source.enabled():
-        return await progress("❌ DATABASE_URL_1/2/3 সেট করা নেই (লাইভ বটের ক্যান্ডেল ডেটাবেজ)।")
+    _miss = data_missing(st["pairs"])
+    if _miss:
+        return await progress("❌ " + _miss)
     days = engine3.period_days(st["months"])
     plist = list(st["pairs"])
     total, sent_any = len(plist), False
@@ -1186,6 +1256,7 @@ async def cmd_engine8(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     only = [p for p in (pairs.norm(t) for a in (ctx.args or []) for t in a.replace(",", " ").split()) if p]
     if only:
         E8["pairs"] = list(dict.fromkeys(only))
+        E8["mkt"] = "otc" if pairs.is_otc(only[0]) else "real"
     E8["page"] = "main"
     E3["wait"] = False
     E6["wait"] = False
@@ -1214,7 +1285,11 @@ async def on_e8_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ctx.application.bot_data["e8_job"] = asyncio.create_task(e8_job(q.message.chat_id, prog, st))
         return
     await q.answer()
-    if key == "pg":
+    if key == "mk":
+        E8["mkt"] = "otc" if val == "otc" else "real"
+        E8["pairs"] = []
+        E8["page"] = "main"
+    elif key == "pg":
         E8["page"] = val
     elif key == "tf":
         E8["tf"] = int(val)
@@ -1237,7 +1312,7 @@ async def on_e8_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif key == "tp":
         E8["pairs"] = [p for p in E8["pairs"] if p != val] if val in E8["pairs"] else E8["pairs"] + [val]
     elif key == "pall":
-        E8["pairs"] = list(pairs.PAIRS)
+        E8["pairs"] = list(pairs.plist(E8.get("mkt")))
     elif key == "pclr":
         E8["pairs"] = []
     elif key == "tm":
@@ -1267,10 +1342,11 @@ async def on_e8_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ---------------------------------------------------------------- /engine9  (Engine 8's lowest-B2B minutes -> straight into Engine 4's loss-streak signals, as text)
-E9 = dict(tf=1, months=4, mtg=[1], n=3, scope="day", mode="exact", pairs=[], page="main", wait=False)   # wait: False | "months" | "tf"
+E9 = dict(mkt="real", tf=1, months=4, mtg=[1], n=3, scope="day", mode="exact", pairs=[], page="main", wait=False)   # wait: False | "months" | "tf"
 E9_TF_PRESETS = (1, 3, 5)
 
 
+@with_market_text(E9, "e9")
 def e9_text():
     ps = ", ".join(pairs.pretty(p) for p in E9["pairs"]) or "— (বাছাই করোনি)"
     return ("🔗 ইঞ্জিন ৯ — ইঞ্জিন ৮ + ইঞ্জিন ৪\n\n"
@@ -1281,11 +1357,12 @@ def e9_text():
                 E9["tf"], e3_label(E9["months"]), (" + ".join(E3_MTG[v] for v in sorted(E9["mtg"])) or "— (বাছাই করোনি)"), E9["n"], E4_MODE[E9["mode"]], E4_SCOPE[E9["scope"]], ps))
 
 
+@with_market("e9", E9)
 def e9_kb():
     tick = e8_tick
     if E9["page"] == "pairs":
         rows, cur = [], []
-        for p in pairs.PAIRS:
+        for p in pairs.plist(E9.get("mkt")):
             cur.append(Btn(tick(p in E9["pairs"], pairs.pretty(p)), callback_data="e9:tp:%s" % p))
             if len(cur) == 3:
                 rows.append(cur)
@@ -1313,8 +1390,9 @@ async def e9_job(chat_id, prog, st):
             await prog.edit_text(t)
         except BadRequest:
             pass
-    if not source.enabled():
-        return await progress("❌ DATABASE_URL_1/2/3 সেট করা নেই (লাইভ বটের ক্যান্ডেল ডেটাবেজ)।")
+    _miss = data_missing(st["pairs"])
+    if _miss:
+        return await progress("❌ " + _miss)
     days = engine3.period_days(st["months"])
     plist = list(st["pairs"])
     total, sent_any = len(plist), False
@@ -1372,6 +1450,7 @@ async def cmd_engine9(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     only = [p for p in (pairs.norm(t) for a in (ctx.args or []) for t in a.replace(",", " ").split()) if p]
     if only:
         E9["pairs"] = list(dict.fromkeys(only))
+        E9["mkt"] = "otc" if pairs.is_otc(only[0]) else "real"
     E9["page"] = "main"
     E3["wait"] = False
     E6["wait"] = False
@@ -1400,7 +1479,11 @@ async def on_e9_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ctx.application.bot_data["e9_job"] = asyncio.create_task(e9_job(q.message.chat_id, prog, st))
         return
     await q.answer()
-    if key == "pg":
+    if key == "mk":
+        E9["mkt"] = "otc" if val == "otc" else "real"
+        E9["pairs"] = []
+        E9["page"] = "main"
+    elif key == "pg":
         E9["page"] = val
     elif key == "tf":
         if val == "custom":
@@ -1437,7 +1520,7 @@ async def on_e9_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif key == "tp":
         E9["pairs"] = [p for p in E9["pairs"] if p != val] if val in E9["pairs"] else E9["pairs"] + [val]
     elif key == "pall":
-        E9["pairs"] = list(pairs.PAIRS)
+        E9["pairs"] = list(pairs.plist(E9.get("mkt")))
     elif key == "pclr":
         E9["pairs"] = []
     try:
@@ -1465,11 +1548,12 @@ async def on_e9_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ---------------------------------------------------------------- /engine10  (Signal Radar: Engine 9's 100% slots -> live UP/DOWN alerts)
-E10 = dict(tf=1, months=4, mtg=[1], n=3, mode="exact", minsig=3, pdf=False, csv=False, pairs=[], page="main", wait=False)   # wait: False | "months" | "tf" | "minsig"
+E10 = dict(mkt="real", tf=1, months=4, mtg=[1], n=3, mode="exact", minsig=3, pdf=False, csv=False, pairs=[], page="main", wait=False)   # wait: False | "months" | "tf" | "minsig"
 E10_TF_PRESETS = (1, 3, 5)
 E10_MINSIG_PRESETS = (1, 3, 5)
 
 
+@with_market_text(E10, "e10")
 def e10_text():
     ps = ", ".join(pairs.pretty(p) for p in E10["pairs"]) or "— (বাছাই করোনি)"
     st, cf = radar.state(), radar.cfg()
@@ -1498,11 +1582,12 @@ def e10_text():
     return "\n".join(lines)
 
 
+@with_market("e10", E10)
 def e10_kb():
     tick = e8_tick
     if E10["page"] == "pairs":
         rows, cur = [], []
-        for p in pairs.PAIRS:
+        for p in pairs.plist(E10.get("mkt")):
             cur.append(Btn(tick(p in E10["pairs"], pairs.pretty(p)), callback_data="e10:tp:%s" % p))
             if len(cur) == 3:
                 rows.append(cur)
@@ -1530,7 +1615,7 @@ def e10_kb():
 
 def e10_settings():
     return dict(tf=E10["tf"], months=E10["months"], months_label=e3_label(E10["months"]), mtg=sorted(E10["mtg"]), n=E10["n"],
-                mode=E10["mode"], minsig=E10["minsig"], pdf=E10["pdf"], csv=E10["csv"], pairs=list(E10["pairs"]))
+                mode=E10["mode"], minsig=E10["minsig"], pdf=E10["pdf"], csv=E10["csv"], pairs=list(E10["pairs"]), mkt=E10.get("mkt", "real"))
 
 
 async def e10_build(chat_id, prog, st, auto=False):
@@ -1545,13 +1630,17 @@ async def e10_build(chat_id, prog, st, auto=False):
     async with SCAN_LOCK:
         per = await radar.build(st, progress)
     rules = [r for e in per if e for r in e["rules"]]
-    await radar.set_rules(rules, dict(st))
+    otc = any(pairs.is_otc(p) for p in st["pairs"])
+    if not otc:        # OTC has no live candles: its list is only shown/sent, the live radar list (real market) stays untouched
+        await radar.set_rules(rules, dict(st))
     if prog:
         try:
             await prog.delete()
         except Exception:  # noqa
             pass
     texts = radar.summary_text(per, st)
+    if otc:
+        texts[0] = "🧪 OTC মার্কেট (ডাটাবেজ থেকে, লাইভ রাডারে যায়নি)\n\n" + texts[0]
     if auto:
         texts[0] = "🔄 রাডার তালিকা আজকের জন্য নতুন হলো\n\n" + texts[0]
     for t in texts:
@@ -1586,6 +1675,7 @@ async def cmd_engine10(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     only = [p for p in (pairs.norm(t) for a in (ctx.args or []) for t in a.replace(",", " ").split()) if p]
     if only:
         E10["pairs"] = list(dict.fromkeys(only))
+        E10["mkt"] = "otc" if pairs.is_otc(only[0]) else "real"
     E10["page"] = "main"
     E3["wait"] = False
     E6["wait"] = False
@@ -1602,10 +1692,11 @@ async def on_e10_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     parts = q.data.split(":")
     key, val = parts[1], parts[2]
     if key == "build":
-        if not source.enabled():
-            return await q.answer("DATABASE_URL_1/2/3 সেট করা নেই", show_alert=True)
         if not E10["pairs"]:
             return await q.answer("আগে অন্তত একটা পেয়ার বাছো", show_alert=True)
+        _miss = data_missing(E10["pairs"])
+        if _miss:
+            return await q.answer(_miss, show_alert=True)
         if not E10["mtg"]:
             return await q.answer("অন্তত একটা MTG অপশন বাছো", show_alert=True)
         if SCAN_LOCK.locked():
@@ -1640,7 +1731,11 @@ async def on_e10_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await q.answer("রাডার চালু ✅" if radar.cfg()["on"] else "রাডার বন্ধ ⏸")
     else:
         await q.answer()
-    if key == "pg":
+    if key == "mk":
+        E10["mkt"] = "otc" if val == "otc" else "real"
+        E10["pairs"] = []
+        E10["page"] = "main"
+    elif key == "pg":
         E10["page"] = val
     elif key in ("tf", "mo", "ms") and val == "custom":
         E10["wait"] = {"tf": "tf", "mo": "months", "ms": "minsig"}[key]
@@ -1674,7 +1769,7 @@ async def on_e10_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif key == "tp":
         E10["pairs"] = [p for p in E10["pairs"] if p != val] if val in E10["pairs"] else E10["pairs"] + [val]
     elif key == "pall":
-        E10["pairs"] = list(pairs.PAIRS)
+        E10["pairs"] = list(pairs.plist(E10.get("mkt")))
     elif key == "pclr":
         E10["pairs"] = []
     try:
@@ -1707,13 +1802,14 @@ async def on_e10_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ---------------------------------------------------------------- /engine4  (Loss-streak signal finder)
-E4 = dict(tf=5, mtg=1, n=2, scope="day", mode="exact", side="G", months=1, out="PDF", pairs=[], minutes=[], page="main")
+E4 = dict(mkt="real", tf=5, mtg=1, n=2, scope="day", mode="exact", side="G", months=1, out="PDF", pairs=[], minutes=[], page="main")
 E4_SIDE = {"G": "🟢 গ্রিন", "R": "🔴 রেড", "GR": "দুটোই"}
 E4_SCOPE = {"day": "ডে", "chain": "চেইন"}
 E4_MODE = {"exact": "ঠিক N", "atleast": "N বা বেশি"}
 E4_OUT = {"PDF": "PDF", "CSV": "CSV", "BOTH": "দুটোই"}
 
 
+@with_market_text(E4, "e4")
 def e4_text():
     ps = ", ".join(pairs.pretty(p) for p in E4["pairs"]) or "— (বাছাই করোনি)"
     ms = " ".join(":%02d" % m for m in sorted(E4["minutes"])) or "— (বাছাই করোনি)"
@@ -1729,12 +1825,13 @@ def e4_text():
                 E4_SIDE[E4["side"]], E3_MONTHS[E4["months"]], E4_OUT[E4["out"]], ps, ms))
 
 
+@with_market("e4", E4)
 def e4_kb():
     def tick(on, label):
         return ("✅ " if on else "") + label
     if E4["page"] == "pairs":
         rows, cur = [], []
-        for p in pairs.PAIRS:
+        for p in pairs.plist(E4.get("mkt")):
             cur.append(Btn(tick(p in E4["pairs"], pairs.pretty(p)), callback_data="e4:tp:%s" % p))
             if len(cur) == 3:
                 rows.append(cur)
@@ -1773,8 +1870,9 @@ async def e4_job(chat_id, prog, st):
             await prog.edit_text(t)
         except BadRequest:
             pass
-    if not source.enabled():
-        return await progress("❌ DATABASE_URL_1/2/3 সেট করা নেই (লাইভ বটের ক্যান্ডেল ডেটাবেজ)।")
+    _miss = data_missing(st["pairs"])
+    if _miss:
+        return await progress("❌ " + _miss)
     days = engine3.PERIOD_DAYS[st["months"]]
     stamp = dt.datetime.now(pairs.BDT).strftime("%Y%m%d_%H%M")
     sides = ["G", "R"] if st["side"] == "GR" else [st["side"]]
@@ -1823,6 +1921,7 @@ async def cmd_engine4(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     only = [p for p in (pairs.norm(t) for a in (ctx.args or []) for t in a.replace(",", " ").split()) if p]
     if only:
         E4["pairs"] = list(dict.fromkeys(only))
+        E4["mkt"] = "otc" if pairs.is_otc(only[0]) else "real"
     E4["page"] = "main"
     await update.effective_message.reply_text(e4_text(), reply_markup=e4_kb())
 
@@ -1843,7 +1942,11 @@ async def on_e4_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ctx.application.bot_data["e4_job"] = asyncio.create_task(e4_job(q.message.chat_id, prog, st))
         return
     await q.answer()
-    if key == "pg":
+    if key == "mk":
+        E4["mkt"] = "otc" if val == "otc" else "real"
+        E4["pairs"] = []
+        E4["page"] = "main"
+    elif key == "pg":
         E4["page"] = val
     elif key == "tf":
         E4["tf"] = int(val)
@@ -1865,7 +1968,7 @@ async def on_e4_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif key == "tp":
         E4["pairs"] = [p for p in E4["pairs"] if p != val] if val in E4["pairs"] else E4["pairs"] + [val]
     elif key == "pall":
-        E4["pairs"] = list(pairs.PAIRS)
+        E4["pairs"] = list(pairs.plist(E4.get("mkt")))
     elif key == "pclr":
         E4["pairs"] = []
     elif key == "tm":

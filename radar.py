@@ -273,7 +273,8 @@ async def alert_tick(send):
     slot = int(now // 60 + 1) * 60
     loc = slot + engine3.OFF
     hour, minute = (loc % 86400) // 3600, (loc % 3600) // 60
-    rules = [r for r in _state["rules"] if r["minute"] == minute and HOURS[0] <= hour <= HOURS[-1]]
+    rules = [r for r in _state["rules"] if r["minute"] == minute and HOURS[0] <= hour <= HOURS[-1]
+             and not pairs.is_otc(r["pair"])]        # OTC has no live candles (only the real-market list is live)
     if not rules:
         return                            # nothing to do -> no request to OANDA
     if live.market_closed(now):
