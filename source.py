@@ -149,3 +149,30 @@ def _otc_bounds(pair):
             f = lambda d: int(d.replace(tzinfo=dt.timezone.utc).timestamp()) - OTC_OFF
             return f(lo), f(hi)
     return None, None
+
+
+# ---------------------------------------------------------------- /db overview (read-only)
+def db_overview(market):
+    """market 'real' | 'otc' -> list of dict(i, mb, rows, err, pairs=[dict(pair, lo, hi, n)]) one per configured database.
+    lo / hi are unix seconds (UTC); n = number of stored M1 candles. Never writes."""
+    otc = market == "otc"
+    urls = OTC_URLS if otc else URLS
+    out = []
+    for i, u in enumerate(urls):
+        d = dict(i=i + 1, mb=0, rows=0, err="", pairs=[])
+        try:
+            with psycopg.connect(u, connect_timeout=30) as c:
+                c.read_only = True
+                d["mb"] = (c.execute("SELECT pg_database_size(current_database())").fetchone()[0]) / 1048576.0
+                for p, lo, hi, n in c.execute("SELECT pair, min(ts), max(ts), count(*) FROM candles GROUP BY pair ORDER BY pair").fetchall():
+                    if otc:
+                        f = lambda x: int(x.replace(tzinfo=dt.timezone.utc).timestamp()) - OTC_OFF  # noqa: E731
+                        name, lo, hi = p, f(lo), f(hi)
+                    else:
+                        name = pairs.LEGACY_PAIRS[p] if isinstance(p, int) and 0 <= p < len(pairs.LEGACY_PAIRS) else str(p)
+                    d["pairs"].append(dict(pair=name, lo=int(lo), hi=int(hi), n=int(n)))
+                    d["rows"] += int(n)
+        except Exception as e:  # noqa
+            d["err"] = str(e)[:150]
+        out.append(d)
+    return out

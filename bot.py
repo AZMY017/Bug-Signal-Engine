@@ -119,7 +119,7 @@ LEGEND = ("✅ = টেস্ট পিরিয়ডেও টিকেছে 
 
 
 def head_cmds():
-    return ("/check USDJPY 30 UP 12-24 — একটা নির্দিষ্ট স্লটের হিসাব\n/engine3 — ইঞ্জিন ৩ (মিনিট গ্রিড: G/R টেবিল + উইন রেশিও, PDF/CSV)\n/engine4 — ইঞ্জিন ৪ (ব্যাক-টু-ব্যাক লসের পর সিগন্যাল গোনা)\n/engine6 — ইঞ্জিন ৬ (ইঞ্জিন ৩-এর মতো, কিন্তু গ্রিন/রেড আলাদা চার্ট, একদিনের কম B2B লস আগে)\n/engine8 — ইঞ্জিন ৮ (ইঞ্জিন ৬-এর হিসাব, শুধু টেক্সট: গ্রিন/রেডের সর্বনিম্ন B2B লসের মিনিটগুলো)\n/engine9 — ইঞ্জিন ৯ (ইঞ্জিন ৮-এর মিনিটগুলো সরাসরি ইঞ্জিন ৪-এর সিগন্যাল গণনায়, শুধু টেক্সট)\n/engine10 — ইঞ্জিন ১০ সিগন্যাল রাডার (১০০% উইনের স্লট থেকে লাইভ UP/DOWN অ্যালার্ট + রেজাল্ট)\n/live — লাইভ অ্যালার্ট চালু/বন্ধ\n/status — অবস্থা\n/data — ডেটা কভারেজ\n/id — আমার Telegram ID")
+    return ("/check USDJPY 30 UP 12-24 — একটা নির্দিষ্ট স্লটের হিসাব\n/engine3 — ইঞ্জিন ৩ (মিনিট গ্রিড: G/R টেবিল + উইন রেশিও, PDF/CSV)\n/engine4 — ইঞ্জিন ৪ (ব্যাক-টু-ব্যাক লসের পর সিগন্যাল গোনা)\n/engine6 — ইঞ্জিন ৬ (ইঞ্জিন ৩-এর মতো, কিন্তু গ্রিন/রেড আলাদা চার্ট, একদিনের কম B2B লস আগে)\n/engine8 — ইঞ্জিন ৮ (ইঞ্জিন ৬-এর হিসাব, শুধু টেক্সট: গ্রিন/রেডের সর্বনিম্ন B2B লসের মিনিটগুলো)\n/engine9 — ইঞ্জিন ৯ (ইঞ্জিন ৮-এর মিনিটগুলো সরাসরি ইঞ্জিন ৪-এর সিগন্যাল গণনায়, শুধু টেক্সট)\n/engine10 — ইঞ্জিন ১০ সিগন্যাল রাডার (১০০% উইনের স্লট থেকে লাইভ UP/DOWN অ্যালার্ট + রেজাল্ট)\n/live — লাইভ অ্যালার্ট চালু/বন্ধ\n/status — অবস্থা\n/data — ডেটা কভারেজ\n/db — ডাটাবেজ সাইজ + কত দিনের ডেটা জমা (রিয়েল ও OTC)\n/id — আমার Telegram ID")
 
 
 # ---------------------------------------------------------------- scan
@@ -434,6 +434,61 @@ async def cmd_data(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             L.append("%s: %d দিন • শেষ ক্যান্ডেল %s" % (pairs.pretty(p), (hi - lo) // 86400,
                                                       dt.datetime.fromtimestamp(hi, pairs.BDT).strftime("%d/%m %H:%M")))
     await msg.edit_text("\n".join(L)[:4000])
+
+
+async def cmd_db(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """/db = real + OTC, /db real, /db otc : every Neon candle database (size, pairs, rows, days stored) + how long a back-test can be."""
+    if not allowed(update):
+        return await deny(update)
+    arg = (ctx.args[0].lower() if ctx.args else "")
+    mk = ["otc"] if arg == "otc" else ["real"] if arg in ("real", "r") else ["real", "otc"]
+    limit = _f("DB_LIMIT_MB", "1024")
+    for m in mk:
+        title = "🧪 OTC মার্কেট" if m == "otc" else "📈 রিয়েল মার্কেট"
+        if (m == "otc" and not source.otc_enabled()) or (m == "real" and not source.enabled()):
+            await update.effective_message.reply_text("%s: %s সেট করা নেই।" % (title, "OTC_DATABASE_URL_*" if m == "otc" else "DATABASE_URL_*"))
+            continue
+        msg = await update.effective_message.reply_text("%s: ডাটাবেজ দেখছি…" % title)
+        try:
+            dbs = await asyncio.to_thread(source.db_overview, m)
+        except Exception as e:  # noqa
+            await msg.edit_text("❌ %s: %s" % (title, e))
+            continue
+        L = ["%s — ডাটাবেজ ও জমা ডেটা" % title, ""]
+        tot_mb, tot_rows, spans = 0.0, 0, []
+        for d in dbs:
+            if d["err"]:
+                L += ["DB%d: ❌ %s" % (d["i"], d["err"]), ""]
+                continue
+            tot_mb += d["mb"]
+            tot_rows += d["rows"]
+            L.append("DB%d: %.0f MB / %d MB (%d%%) • %d পেয়ার • %d সারি" % (d["i"], d["mb"], limit, round(d["mb"] * 100 / limit), len(d["pairs"]), d["rows"]))
+            for p in d["pairs"]:
+                days = (p["hi"] - p["lo"]) // 86400 + 1
+                spans.append((days, p["pair"], p["lo"], p["hi"]))
+                f = lambda t: dt.datetime.fromtimestamp(t, pairs.BDT).strftime("%d/%m/%y")  # noqa: E731
+                L.append("  %s: %d দিন • %s → %s • %d ক্যান্ডেল" % (pairs.pretty(p["pair"]) if not p["pair"].startswith("_") else p["pair"], days, f(p["lo"]), f(p["hi"]),
+                                                                     p["n"]))
+            L.append("")
+        L.append("মোট: %.0f MB • %d সারি" % (tot_mb, tot_rows))
+        if spans:
+            lo_d = min(spans)
+            hi_d = max(spans)
+            L.append("")
+            L.append("🔎 ব্যাক-টেস্ট: সবচেয়ে কম ডেটা %s = %d দিন, সবচেয়ে বেশি %s = %d দিন।" % (pairs.pretty(lo_d[1]), lo_d[0], pairs.pretty(hi_d[1]), hi_d[0]))
+            L.append("সব পেয়ারে একসাথে সর্বোচ্চ ≈ %d দিন (যেটার ডেটা কম, ওটার দিনেই থামে)। ইঞ্জিনে সীমা %d দিন।" % (lo_d[0], E3_MAX_DAYS))
+        txt = "\n".join(L)
+        chunks, cur = [], ""
+        for line in txt.split("\n"):
+            if len(cur) + len(line) + 1 > 3900:
+                chunks.append(cur)
+                cur = line
+            else:
+                cur = cur + "\n" + line if cur else line
+        chunks.append(cur)
+        await msg.edit_text(chunks[0])
+        for ch in chunks[1:]:
+            await update.effective_message.reply_text(ch)
 
 
 async def cmd_check(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -2021,7 +2076,7 @@ async def post_init(app):
             BotCommand("engine8", "ইঞ্জিন ৮: সর্বনিম্ন B2B লসের মিনিট টেক্সটে (গ্রিন/রেড)"),
             BotCommand("engine9", "ইঞ্জিন ৯: ইঞ্জিন ৮ এর মিনিট সরাসরি ইঞ্জিন ৪ এ (টেক্সট)"),
             BotCommand("engine10", "ইঞ্জিন ১০: সিগন্যাল রাডার (১০০% স্লটের লাইভ UP/DOWN অ্যালার্ট)"),
-            BotCommand("live", "লাইভ অ্যালার্ট"), BotCommand("status", "অবস্থা"), BotCommand("data", "ডেটা কভারেজ"), BotCommand("check", "একটা স্লটের হিসাব দেখো"),
+            BotCommand("live", "লাইভ অ্যালার্ট"), BotCommand("status", "অবস্থা"), BotCommand("data", "ডেটা কভারেজ"), BotCommand("db", "ডাটাবেজ: সাইজ, কত দিনের ডেটা (রিয়েল + OTC)"), BotCommand("check", "একটা স্লটের হিসাব দেখো"),
             BotCommand("id", "আমার Telegram ID")]
     try:
         await app.bot.set_my_commands(cmds)
@@ -2084,6 +2139,7 @@ def main():
     app.add_handler(CommandHandler("live", cmd_live))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("data", cmd_data))
+    app.add_handler(CommandHandler("db", cmd_db))
     app.add_handler(CommandHandler("check", cmd_check))
     app.add_handler(CommandHandler("engine3", cmd_engine3))
     app.add_handler(CommandHandler("engine4", cmd_engine4))
