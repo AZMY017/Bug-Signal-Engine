@@ -27,7 +27,9 @@ import live
 import oanda
 import otctest
 import radar
+import radar11
 import radar_report
+import radar_report11
 import pairs
 import resultsdb as rdb
 import source
@@ -120,7 +122,7 @@ LEGEND = ("✅ = টেস্ট পিরিয়ডেও টিকেছে 
 
 
 def head_cmds():
-    return ("/check USDJPY 30 UP 12-24 — একটা নির্দিষ্ট স্লটের হিসাব\n/engine3 — ইঞ্জিন ৩ (মিনিট গ্রিড: G/R টেবিল + উইন রেশিও, PDF/CSV)\n/engine4 — ইঞ্জিন ৪ (ব্যাক-টু-ব্যাক লসের পর সিগন্যাল গোনা)\n/engine6 — ইঞ্জিন ৬ (ইঞ্জিন ৩-এর মতো, কিন্তু গ্রিন/রেড আলাদা চার্ট, একদিনের কম B2B লস আগে)\n/engine8 — ইঞ্জিন ৮ (ইঞ্জিন ৬-এর হিসাব, শুধু টেক্সট: গ্রিন/রেডের সর্বনিম্ন B2B লসের মিনিটগুলো)\n/engine9 — ইঞ্জিন ৯ (ইঞ্জিন ৮-এর মিনিটগুলো সরাসরি ইঞ্জিন ৪-এর সিগন্যাল গণনায়, শুধু টেক্সট)\n/engine10 — ইঞ্জিন ১০ সিগন্যাল রাডার (১০০% উইনের স্লট থেকে লাইভ UP/DOWN অ্যালার্ট + রেজাল্ট)\n/live — লাইভ অ্যালার্ট চালু/বন্ধ\n/status — অবস্থা\n/data — ডেটা কভারেজ\n/db — ডাটাবেজ সাইজ + কত দিনের ডেটা জমা (রিয়েল ও OTC)\n/otctest — OTC তালিকা পেস্ট করে কোনো দিনের রিপ্লে টেস্ট\n/realtest — রিয়েল তালিকা পেস্ট করে কোনো দিনের রিপ্লে টেস্ট\n/id — আমার Telegram ID")
+    return ("/check USDJPY 30 UP 12-24 — একটা নির্দিষ্ট স্লটের হিসাব\n/engine3 — ইঞ্জিন ৩ (মিনিট গ্রিড: G/R টেবিল + উইন রেশিও, PDF/CSV)\n/engine4 — ইঞ্জিন ৪ (ব্যাক-টু-ব্যাক লসের পর সিগন্যাল গোনা)\n/engine6 — ইঞ্জিন ৬ (ইঞ্জিন ৩-এর মতো, কিন্তু গ্রিন/রেড আলাদা চার্ট, একদিনের কম B2B লস আগে)\n/engine8 — ইঞ্জিন ৮ (ইঞ্জিন ৬-এর হিসাব, শুধু টেক্সট: গ্রিন/রেডের সর্বনিম্ন B2B লসের মিনিটগুলো)\n/engine9 — ইঞ্জিন ৯ (ইঞ্জিন ৮-এর মিনিটগুলো সরাসরি ইঞ্জিন ৪-এর সিগন্যাল গণনায়, শুধু টেক্সট)\n/engine10 — ইঞ্জিন ১০ সিগন্যাল রাডার (১০০% উইনের স্লট থেকে লাইভ UP/DOWN অ্যালার্ট + রেজাল্ট)\n/engine11 — ইঞ্জিন ১১ (ইঞ্জিন ১০-এর মতো, সাথে ব্যাক-টেস্ট কোন তারিখ পর্যন্ত হবে সেটা বাছাই: ডাটাবেজের শেষ দিন অথবা কাস্টম তারিখ)\n/live — লাইভ অ্যালার্ট চালু/বন্ধ\n/status — অবস্থা\n/data — ডেটা কভারেজ\n/db — ডাটাবেজ সাইজ + কত দিনের ডেটা জমা (রিয়েল ও OTC)\n/otctest — OTC তালিকা পেস্ট করে কোনো দিনের রিপ্লে টেস্ট\n/realtest — রিয়েল তালিকা পেস্ট করে কোনো দিনের রিপ্লে টেস্ট\n/id — আমার Telegram ID")
 
 
 # ---------------------------------------------------------------- scan
@@ -910,6 +912,7 @@ async def cmd_engine3(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E6["wait"] = False
     E8["wait"] = False
     E10["wait"] = False
+    E11["wait"] = False
     E9["wait"] = False
     await update.effective_message.reply_text(e3_text(), reply_markup=e3_kb())
 
@@ -926,6 +929,8 @@ async def on_e3_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return await on_e9_text(update, ctx)
     if E10["wait"]:
         return await on_e10_text(update, ctx)
+    if E11["wait"]:
+        return await on_e11_text(update, ctx)
     if not E3["wait"]:
         return
     months = e3_parse_period(update.effective_message.text or "")
@@ -968,6 +973,7 @@ async def on_e3_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             E6["wait"] = False
             E8["wait"] = False
             E10["wait"] = False
+            E11["wait"] = False
             E9["wait"] = False
             await q.message.reply_text(
                 "✏️ কত দিনের ব্যাক-টেস্ট চাও লেখো:\n• মাস: 7 অথবা 7M\n• দিন: 45D\n• বছর: 1Y\n(সর্বোচ্চ %d দিন)" % E3_MAX_DAYS)
@@ -1106,6 +1112,7 @@ async def cmd_engine6(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E6["wait"] = False
     E8["wait"] = False
     E10["wait"] = False
+    E11["wait"] = False
     E9["wait"] = False
     E3["wait"] = False
     await update.effective_message.reply_text(e6_text(), reply_markup=e6_kb())
@@ -1144,6 +1151,7 @@ async def on_e6_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             E3["wait"] = False
             E8["wait"] = False
             E10["wait"] = False
+            E11["wait"] = False
             E9["wait"] = False
             await q.message.reply_text(
                 "✏️ কত দিনের ব্যাক-টেস্ট চাও লেখো:\n• মাস: 7 অথবা 7M\n• দিন: 45D\n• বছর: 1Y\n(সর্বোচ্চ %d দিন)" % E3_MAX_DAYS)
@@ -1151,6 +1159,7 @@ async def on_e6_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         E6["wait"] = False
         E8["wait"] = False
         E10["wait"] = False
+        E11["wait"] = False
         E9["wait"] = False
         E6["months"] = int(val)
     elif key == "out":
@@ -1186,6 +1195,7 @@ async def on_e6_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E6["wait"] = False
     E8["wait"] = False
     E10["wait"] = False
+    E11["wait"] = False
     E9["wait"] = False
     E6["page"] = "main"
     await update.effective_message.reply_text(e6_text(), reply_markup=e6_kb())
@@ -1318,6 +1328,7 @@ async def cmd_engine8(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E6["wait"] = False
     E8["wait"] = False
     E10["wait"] = False
+    E11["wait"] = False
     E9["wait"] = False
     await update.effective_message.reply_text(e8_text(), reply_markup=e8_kb())
 
@@ -1360,6 +1371,7 @@ async def on_e8_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
         E8["wait"] = False
         E10["wait"] = False
+        E11["wait"] = False
         E9["wait"] = False
         E8["months"] = int(val)
     elif key == "mtg":
@@ -1392,6 +1404,7 @@ async def on_e8_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E8["months"] = months
     E8["wait"] = False
     E10["wait"] = False
+    E11["wait"] = False
     E9["wait"] = False
     E8["page"] = "main"
     await update.effective_message.reply_text(e8_text(), reply_markup=e8_kb())
@@ -1512,6 +1525,7 @@ async def cmd_engine9(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E6["wait"] = False
     E8["wait"] = False
     E10["wait"] = False
+    E11["wait"] = False
     E9["wait"] = False
     await update.effective_message.reply_text(e9_text(), reply_markup=e9_kb())
 
@@ -1548,6 +1562,7 @@ async def on_e9_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             E6["wait"] = False
             E8["wait"] = False
             E10["wait"] = False
+            E11["wait"] = False
             await q.message.reply_text("✏️ টাইম ফ্রেম কত মিনিট চাও লেখো (যেমন: 2, 3, 4, 5, 10, 15)।\nসংখ্যাটা ৬০-কে ভাগ করতে পারে এমন হতে হবে।")
             return
         E9["wait"] = False
@@ -1559,6 +1574,7 @@ async def on_e9_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             E6["wait"] = False
             E8["wait"] = False
             E10["wait"] = False
+            E11["wait"] = False
             await q.message.reply_text(
                 "✏️ কত দিনের ব্যাক-টেস্ট চাও লেখো:\n• মাস: 7 অথবা 7M\n• দিন: 45D\n• বছর: 1Y\n(সর্বোচ্চ %d দিন)" % E3_MAX_DAYS)
             return
@@ -1738,6 +1754,7 @@ async def cmd_engine10(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E8["wait"] = False
     E9["wait"] = False
     E10["wait"] = False
+    E11["wait"] = False
     await update.effective_message.reply_text(e10_text(), reply_markup=e10_kb())
 
 
@@ -1855,6 +1872,353 @@ async def on_e10_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E10["wait"] = False
     E10["page"] = "main"
     await update.effective_message.reply_text(e10_text(), reply_markup=e10_kb())
+
+
+# ---------------------------------------------------------------- /engine11  (Engine 10 + where the back-test period ends: DB's last day or a custom date)
+# Own state (E11), own radar module (radar11: own list / on-off / alerts) -> Engine 10 stays exactly as it was.
+E11 = dict(mkt="real", tf=1, months=4, mtg=[1], n=3, mode="exact", minsig=3, pdf=False, csv=False, pairs=[], page="main", wait=False,
+           src="db", end=None)   # wait: False | "months" | "tf" | "minsig" | "date";  src: "db" | "custom";  end: 'YYYY-MM-DD' or None
+E11_TF_PRESETS = (1, 3, 5)
+E11_MINSIG_PRESETS = (1, 3, 5)
+
+
+def e11_parse_date(txt):
+    """'13' (day of this month, or of last month if still in the future) / '13/11' / '13-11-2026' / '2026-11-13' -> 'YYYY-MM-DD' or None.
+    Today (BDT) or any past date is allowed, a future date is not."""
+    t = txt.strip().translate(str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789"))
+    today = dt.datetime.now(pairs.BDT).date()
+    try:
+        m = re.fullmatch(r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", t)
+        if m:
+            d = dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        else:
+            m = re.fullmatch(r"(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})", t)
+            if m:
+                d = dt.date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+            else:
+                m = re.fullmatch(r"(\d{1,2})[-/.](\d{1,2})", t)
+                if m:
+                    d = dt.date(today.year, int(m.group(2)), int(m.group(1)))
+                    if d > today:
+                        d = dt.date(today.year - 1, int(m.group(2)), int(m.group(1)))
+                else:
+                    m = re.fullmatch(r"(\d{1,2})", t)
+                    if not m:
+                        return None
+                    dn = int(m.group(1))
+                    try:
+                        d = dt.date(today.year, today.month, dn)
+                    except ValueError:                               # e.g. 31 in a 30-day month -> try last month below
+                        d = today + dt.timedelta(days=1)
+                    if d > today:                                    # e.g. today is the 16th and 20 is typed -> 20th of last month
+                        y, mo = (today.year, today.month - 1) if today.month > 1 else (today.year - 1, 12)
+                        d = dt.date(y, mo, dn)
+    except ValueError:
+        return None
+    if d > today or d < dt.date(2020, 1, 1):
+        return None
+    return d.isoformat()
+
+
+def e11_src_text():
+    if E11["src"] == "custom" and E11["end"]:
+        return "কাস্টম তারিখ %s থেকে বিগত %s" % (E11["end"], e3_label(E11["months"]))
+    if E11["src"] == "custom":
+        return "কাস্টম তারিখ — তারিখ এখনও দাওনি (📅 বাটন চেপে লেখো)"
+    return "ডাটাবেজের শেষ ক্যান্ডেল-দিন থেকে বিগত %s" % e3_label(E11["months"])
+
+
+@with_market_text(E11, "e11")
+def e11_text():
+    ps = ", ".join(pairs.pretty(p) for p in E11["pairs"]) or "— (বাছাই করোনি)"
+    st, cf = radar11.state(), radar11.cfg()
+    on = "চালু ✅" if cf["on"] else "বন্ধ ⏸"
+    if st["rules"]:
+        when = dt.datetime.fromtimestamp(st["built_at"], pairs.BDT).strftime("%d %b %H:%M")
+        w, l, u, o = radar11.tally(live.day_start(time.time()))
+        radar_line = "📡 রাডার ১১: %s • তালিকায় %d স্লট (বানানো %s) • আজ ✅ %d ❌ %d" % (on, len(st["rules"]), when, w, l)
+    else:
+        radar_line = "📡 রাডার ১১: %s • তালিকা এখনও বানানো হয়নি" % on
+    files = " + ".join(x for x, f in (("PDF", E11["pdf"]), ("CSV", E11["csv"])) if f) or "শুধু টেক্সট"
+    mtg = " + ".join(E3_MTG[v] for v in sorted(E11["mtg"])) or "— (বাছাই করোনি)"
+    lines = [
+        "🎯 ইঞ্জিন ১১ — সিগন্যাল রাডার (ইঞ্জিন ১০ + ব্যাক-টেস্টের শেষ তারিখ বাছাই)", "",
+        "ইঞ্জিন ১০-এর মতোই কাজ করে: ইঞ্জিন ৯-এর হিসাবে যে মিনিটে উইন ১০০%% (কমপক্ষে %d টা সিগন্যালসহ), সেগুলো রাডার তালিকায় যায়; "
+        "লাইভে পরপর %d লস গেলে পরের ঘণ্টার স্লটের ৪৫ সেকেন্ড আগে UP/DOWN সিগন্যাল, তারপর WIN/LOSS।" % (E11["minsig"], E11["n"]), "",
+        "⚙️ সেটিং:",
+        "• টাইম ফ্রেম: %d মিনিট" % E11["tf"],
+        "• সময়কাল (কত দিনের ব্যাক-টেস্ট): %s" % e3_label(E11["months"]),
+        "• ব্যাক-টেস্ট শেষ হবে: %s" % e11_src_text(),
+        "• MTG: %s" % mtg,
+        "• ব্যাক-টু-ব্যাক লস: %d টা (%s)" % (E11["n"], E4_MODE[E11["mode"]]),
+        "• ন্যূনতম সিগন্যাল: %d" % E11["minsig"],
+        "• ফাইল (টেক্সটের সাথে): %s" % files,
+        "• পেয়ার: %s" % ps, "",
+        radar_line,
+        "(তালিকা প্রতিদিন ১১:৩০-এর পর নিজে নতুন হয়, রাডার চালু থাকলে — কাস্টম তারিখ বাছা থাকলে ওই একই তারিখ ধরেই হয়)"]
+    return "\n".join(lines)
+
+
+@with_market("e11", E11)
+def e11_kb():
+    tick = e8_tick
+    if E11["page"] == "pairs":
+        rows, cur = [], []
+        for p in pairs.plist(E11.get("mkt")):
+            cur.append(Btn(tick(p in E11["pairs"], pairs.pretty(p)), callback_data="e11:tp:%s" % p))
+            if len(cur) == 3:
+                rows.append(cur)
+                cur = []
+        if cur:
+            rows.append(cur)
+        rows.append([Btn("সব পেয়ার", callback_data="e11:pall:0"), Btn("পরিষ্কার", callback_data="e11:pclr:0"), Btn("⬅️ ফিরে", callback_data="e11:pg:main")])
+        return Markup(rows)
+    on = radar11.cfg()["on"]
+    custom = E11["src"] == "custom"
+    return Markup([
+        [Btn(tick(E11["tf"] == v, "%d মিনিট" % v), callback_data="e11:tf:%d" % v) for v in E11_TF_PRESETS]
+        + [Btn(tick(E11["tf"] not in E11_TF_PRESETS, "✏️ %d মিনিট" % E11["tf"] if E11["tf"] not in E11_TF_PRESETS else "✏️"), callback_data="e11:tf:custom")],
+        [Btn(tick(E11["months"] == v, "%dM" % v), callback_data="e11:mo:%d" % v) for v in E3_PRESETS]
+        + [Btn(tick(E11["months"] not in E3_PRESETS, "✏️ " + e3_label(E11["months"]) if E11["months"] not in E3_PRESETS else "✏️"), callback_data="e11:mo:custom")],
+        # NEW in engine 11: where the back-test period ends
+        [Btn(tick(not custom, "🗄 ডাটাবেজের শেষ দিন থেকে"), callback_data="e11:src:db"),
+         Btn(tick(custom, ("📅 কাস্টম: %s" % E11["end"]) if (custom and E11["end"]) else "📅 কাস্টম তারিখ থেকে"), callback_data="e11:src:custom")],
+        [Btn(tick(v in E11["mtg"], lb), callback_data="e11:mtg:%d" % v) for v, lb in E3_MTG.items()],
+        [Btn(tick(E11["n"] == v, "লস %d" % v), callback_data="e11:n:%d" % v) for v in range(1, 7)],
+        [Btn(tick(E11["mode"] == v, lb), callback_data="e11:md:%s" % v) for v, lb in E4_MODE.items()],
+        [Btn(tick(E11["minsig"] == v, "সি. ≥%d" % v), callback_data="e11:ms:%d" % v) for v in E11_MINSIG_PRESETS]
+        + [Btn(tick(E11["minsig"] not in E11_MINSIG_PRESETS, "✏️ সি. ≥%d" % E11["minsig"] if E11["minsig"] not in E11_MINSIG_PRESETS else "✏️"), callback_data="e11:ms:custom")],
+        [Btn(tick(E11["pdf"], "📄 PDF"), callback_data="e11:pdf:0"), Btn(tick(E11["csv"], "📊 CSV"), callback_data="e11:csv:0")],
+        [Btn("💱 পেয়ার (%d)" % len(E11["pairs"]), callback_data="e11:pg:pairs")],
+        [Btn("🔄 তালিকা বানাও", callback_data="e11:build:0"), Btn("📋 তালিকা দেখো", callback_data="e11:show:0")],
+        [Btn("⏸ রাডার বন্ধ করো" if on else "📡 রাডার চালু করো", callback_data="e11:tg:0")]])
+
+
+def e11_settings():
+    return dict(tf=E11["tf"], months=E11["months"], months_label=e3_label(E11["months"]), mtg=sorted(E11["mtg"]), n=E11["n"],
+                mode=E11["mode"], minsig=E11["minsig"], pdf=E11["pdf"], csv=E11["csv"], pairs=list(E11["pairs"]), mkt=E11.get("mkt", "real"),
+                src=E11["src"], end=E11["end"] if E11["src"] == "custom" else None)
+
+
+async def e11_build(chat_id, prog, st, auto=False):
+    """Builds the radar-11 list (Neon is read here, once), saves it, sends the short text (+ PDF / CSV when chosen).
+    prog is None for the daily automatic rebuild."""
+    async def progress(i, n):
+        if prog:
+            try:
+                await prog.edit_text("⏳ ইঞ্জিন ১১: %d/%d পেয়ার শেষ" % (i, n))
+            except BadRequest:
+                pass
+    async with SCAN_LOCK:
+        per = await radar11.build(st, progress)
+    rules = [r for e in per if e for r in e["rules"]]
+    otc = any(pairs.is_otc(p) for p in st["pairs"])
+    if not otc:        # OTC has no live candles: its list is only shown/sent, the live radar list (real market) stays untouched
+        meta = dict(st)
+        meta["span"] = radar11.span_of(per)
+        meta["short"] = radar11.short_notes(per, st)
+        await radar11.set_rules(rules, meta)
+    if prog:
+        try:
+            await prog.delete()
+        except Exception:  # noqa
+            pass
+    texts = radar11.summary_text(per, st)
+    if otc:
+        texts[0] = "🧪 OTC মার্কেট (ডাটাবেজ থেকে, লাইভ রাডারে যায়নি)\n\n" + texts[0]
+    if auto:
+        texts[0] = "🔄 রাডার ১১ তালিকা আজকের জন্য নতুন হলো\n\n" + texts[0]
+    for t in texts:
+        await send(chat_id, t[:4000])
+    stamp = dt.datetime.now(pairs.BDT).strftime("%Y%m%d_%H%M")
+    try:
+        if st.get("pdf"):
+            bio = await asyncio.to_thread(radar_report11.make_pdf, per, st)
+            bio.name = "engine11_radar_%s.pdf" % stamp
+            await APP.bot.send_document(chat_id, bio, caption="সিগন্যাল রাডার ১১: সব ডিটেলস (PDF ইংরেজিতে)")
+        if st.get("csv"):
+            s_, g_ = await asyncio.to_thread(radar_report11.make_csv, per, st)
+            await APP.bot.send_document(chat_id, io.BytesIO(s_), filename="engine11_slots_%s.csv" % stamp, caption="স্লট সারসংক্ষেপ (রাডারে আছে/নেই + কারণ)")
+            await APP.bot.send_document(chat_id, io.BytesIO(g_), filename="engine11_signals_%s.csv" % stamp, caption="প্রতিটা সিগন্যালের তারিখ ও রেজাল্ট")
+    except Exception:  # noqa
+        log.exception("engine11 report files failed")
+        await send(chat_id, "⚠️ তালিকা হয়েছে, কিন্তু PDF/CSV বানাতে সমস্যা হয়েছে।")
+
+
+async def e11_refresh():
+    """Daily automatic rebuild with the saved settings (called by radar11.refresh_loop)."""
+    chat = radar11.cfg()["chat"]
+    st = radar11.state()["meta"]
+    if not chat or not st.get("pairs") or SCAN_LOCK.locked() or not source.enabled():
+        return
+    await e11_build(chat, None, st, auto=True)
+
+
+async def cmd_engine11(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return await deny(update)
+    only = [p for p in (pairs.norm(t) for a in (ctx.args or []) for t in a.replace(",", " ").split()) if p]
+    if only:
+        E11["pairs"] = list(dict.fromkeys(only))
+        E11["mkt"] = "otc" if pairs.is_otc(only[0]) else "real"
+    E11["page"] = "main"
+    E3["wait"] = False
+    E6["wait"] = False
+    E8["wait"] = False
+    E9["wait"] = False
+    E10["wait"] = False
+    E11["wait"] = False
+    await update.effective_message.reply_text(e11_text(), reply_markup=e11_kb())
+
+
+def _e11_other_waits_off():
+    E3["wait"] = False
+    E6["wait"] = False
+    E8["wait"] = False
+    E9["wait"] = False
+    E10["wait"] = False
+
+
+async def on_e11_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    if not allowed(update):
+        return await q.answer("অনুমতি নেই", show_alert=True)
+    parts = q.data.split(":")
+    key, val = parts[1], parts[2]
+    if key == "build":
+        if not E11["pairs"]:
+            return await q.answer("আগে অন্তত একটা পেয়ার বাছো", show_alert=True)
+        _miss = data_missing(E11["pairs"])
+        if _miss:
+            return await q.answer(_miss, show_alert=True)
+        if not E11["mtg"]:
+            return await q.answer("অন্তত একটা MTG অপশন বাছো", show_alert=True)
+        if E11["src"] == "custom" and not E11["end"]:
+            return await q.answer("কাস্টম তারিখ বাছা আছে কিন্তু তারিখ লেখোনি। 📅 বাটন চেপে তারিখ লেখো, নয়তো 🗄 ডাটাবেজের শেষ দিন বাছো।", show_alert=True)
+        if SCAN_LOCK.locked():
+            return await q.answer("একটা স্ক্যান চলছে, শেষ হলে চাপো।", show_alert=True)
+        await q.answer("শুরু হচ্ছে…")
+        prog = await q.message.reply_text("⏳ ইঞ্জিন ১১: তালিকা বানানো শুরু…")
+
+        async def run():
+            try:
+                await e11_build(q.message.chat_id, prog, e11_settings())
+                if radar11.cfg()["on"]:
+                    await radar11.set_cfg(chat=q.message.chat_id)
+            except Exception as e:  # noqa
+                log.exception("engine11 build failed")
+                try:
+                    await prog.edit_text("❌ ইঞ্জিন ১১ হয়নি: %s" % e)
+                except Exception:  # noqa
+                    pass
+        ctx.application.bot_data["e11_job"] = asyncio.create_task(run())
+        return
+    if key == "show":
+        await q.answer()
+        for t in radar11.list_text():
+            await q.message.reply_text(t[:4000])
+        return
+    if key == "tg":
+        if not radar11.cfg()["on"] and not radar11.state()["rules"]:
+            return await q.answer("আগে 🔄 তালিকা বানাও", show_alert=True)
+        if not radar11.cfg()["on"] and not oanda.KEY:
+            return await q.answer("OANDA key সেট করা নেই — লাইভ ক্যান্ডেল পাওয়া যাবে না", show_alert=True)
+        await radar11.set_cfg(on=not radar11.cfg()["on"], chat=q.message.chat_id)
+        await q.answer("রাডার ১১ চালু ✅" if radar11.cfg()["on"] else "রাডার ১১ বন্ধ ⏸")
+    else:
+        await q.answer()
+    if key == "mk":
+        E11["mkt"] = "otc" if val == "otc" else "real"
+        E11["pairs"] = []
+        E11["page"] = "main"
+    elif key == "pg":
+        E11["page"] = val
+    elif key == "src" and val == "custom":
+        E11["src"] = "custom"
+        E11["wait"] = "date"
+        _e11_other_waits_off()
+        today = dt.datetime.now(pairs.BDT).date()
+        await q.message.reply_text(
+            "📅 কোন তারিখ থেকে বিগত %s ব্যাক-টেস্ট হবে লেখো (ওই তারিখটাও ধরা হবে):\n"
+            "• শুধু দিন: 13 (এই মাসের ১৩ তারিখ; ভবিষ্যতের হলে আগের মাসের)\n"
+            "• দিন/মাস: 13/11\n"
+            "• পুরো তারিখ: 13-11-2026 অথবা 2026-11-13\n"
+            "(আজ %s। আজকের বা ভবিষ্যতের অসম্পূর্ণ দিন ব্যাক-টেস্টে ধরা হয় না।)" % (
+                e3_label(E11["months"]), today.isoformat()))
+        try:
+            await q.edit_message_text(e11_text(), reply_markup=e11_kb())
+        except BadRequest:
+            pass
+        return
+    elif key == "src":
+        E11["src"] = "db"
+        E11["wait"] = False
+    elif key in ("tf", "mo", "ms") and val == "custom":
+        E11["wait"] = {"tf": "tf", "mo": "months", "ms": "minsig"}[key]
+        _e11_other_waits_off()
+        ask = {"tf": "✏️ টাইম ফ্রেম কত মিনিট চাও লেখো (যেমন: 2, 3, 4, 5, 10, 15)।\nসংখ্যাটা ৬০-কে ভাগ করতে পারে এমন হতে হবে।",
+               "mo": "✏️ কত দিনের ব্যাক-টেস্ট চাও লেখো:\n• মাস: 7 অথবা 7M\n• দিন: 45D\n• বছর: 1Y\n(সর্বোচ্চ %d দিন)" % E3_MAX_DAYS,
+               "ms": "✏️ রাডারে ঢুকতে একটা মিনিটে কমপক্ষে কয়টা সিগন্যাল লাগবে লেখো (১ থেকে ৫০)।"}[key]
+        await q.message.reply_text(ask)
+        return
+    elif key == "tf":
+        E11["wait"] = False
+        E11["tf"] = int(val)
+    elif key == "mo":
+        E11["wait"] = False
+        E11["months"] = int(val)
+    elif key == "ms":
+        E11["wait"] = False
+        E11["minsig"] = int(val)
+    elif key in ("pdf", "csv"):
+        E11[key] = not E11[key]
+    elif key == "mtg":
+        v = int(val)
+        E11["mtg"] = [x for x in E11["mtg"] if x != v] if v in E11["mtg"] else sorted(E11["mtg"] + [v])
+    elif key == "n":
+        E11["n"] = int(val)
+    elif key == "md":
+        E11["mode"] = val
+    elif key == "tp":
+        E11["pairs"] = [p for p in E11["pairs"] if p != val] if val in E11["pairs"] else E11["pairs"] + [val]
+    elif key == "pall":
+        E11["pairs"] = list(pairs.plist(E11.get("mkt")))
+    elif key == "pclr":
+        E11["pairs"] = []
+    try:
+        await q.edit_message_text(e11_text(), reply_markup=e11_kb())
+    except BadRequest:
+        pass
+
+
+async def on_e11_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Reply to a ✏️ / 📅 prompt of /engine11 (called from on_e3_text): custom date, period, time frame or minimum signals."""
+    txt = (update.effective_message.text or "").strip().translate(str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789"))
+    w = E11["wait"]
+    if w == "date":
+        d = e11_parse_date(txt)
+        if d is None:
+            return await update.effective_message.reply_text(
+                "বুঝিনি। এভাবে লেখো: 13 / 13/11 / 13-11-2026 / 2026-11-13 (আজকের তারিখ বা তার আগের তারিখ হতে হবে)")
+        E11["end"] = d
+        E11["src"] = "custom"
+    elif w == "tf":
+        t = txt.lower().replace("মিনিট", "").replace("min", "").replace("m", "").strip()
+        if not t.isdigit() or not (1 <= int(t) <= 30) or 60 % int(t):
+            return await update.effective_message.reply_text("বুঝিনি। এমন একটা সংখ্যা লেখো যেটা ৬০-কে ভাগ করে: 1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30")
+        E11["tf"] = int(t)
+    elif w == "minsig":
+        if not txt.isdigit() or not (1 <= int(txt) <= 50):
+            return await update.effective_message.reply_text("বুঝিনি। ১ থেকে ৫০-এর মধ্যে একটা সংখ্যা লেখো।")
+        E11["minsig"] = int(txt)
+    else:
+        months = e3_parse_period(txt)
+        if months is None:
+            return await update.effective_message.reply_text("বুঝিনি। এভাবে লেখো: 7 / 7M / 45D / 1Y (১–%d দিনের মধ্যে)" % E3_MAX_DAYS)
+        E11["months"] = months
+    E11["wait"] = False
+    E11["page"] = "main"
+    await update.effective_message.reply_text(e11_text(), reply_markup=e11_kb())
 
 
 # ---------------------------------------------------------------- /engine4  (Loss-streak signal finder)
@@ -2077,6 +2441,7 @@ async def post_init(app):
             BotCommand("engine8", "ইঞ্জিন ৮: সর্বনিম্ন B2B লসের মিনিট টেক্সটে (গ্রিন/রেড)"),
             BotCommand("engine9", "ইঞ্জিন ৯: ইঞ্জিন ৮ এর মিনিট সরাসরি ইঞ্জিন ৪ এ (টেক্সট)"),
             BotCommand("engine10", "ইঞ্জিন ১০: সিগন্যাল রাডার (১০০% স্লটের লাইভ UP/DOWN অ্যালার্ট)"),
+            BotCommand("engine11", "ইঞ্জিন ১১: রাডার + কাস্টম তারিখ/ডাটাবেজ-শেষ থেকে ব্যাক-টেস্ট"),
             BotCommand("live", "লাইভ অ্যালার্ট"), BotCommand("status", "অবস্থা"), BotCommand("data", "ডেটা কভারেজ"), BotCommand("db", "ডাটাবেজ: সাইজ, কত দিনের ডেটা (রিয়েল + OTC)"), BotCommand("check", "একটা স্লটের হিসাব দেখো"),
             BotCommand("id", "আমার Telegram ID"), otctest.COMMAND, otctest.COMMAND_REAL]
     try:
@@ -2088,6 +2453,7 @@ async def post_init(app):
             await asyncio.to_thread(rdb.init)
             await live.load_state()
             await radar.load_state()
+            await radar11.load_state()
         except Exception:  # noqa
             log.exception("results database init failed")
     else:
@@ -2103,6 +2469,9 @@ async def post_init(app):
     app.bot_data["radar_alert_task"] = asyncio.create_task(radar.alert_loop(send))
     app.bot_data["radar_result_task"] = asyncio.create_task(radar.result_loop(send))
     app.bot_data["radar_refresh_task"] = asyncio.create_task(radar.refresh_loop(e10_refresh))
+    app.bot_data["radar11_alert_task"] = asyncio.create_task(radar11.alert_loop(send))
+    app.bot_data["radar11_result_task"] = asyncio.create_task(radar11.result_loop(send))
+    app.bot_data["radar11_refresh_task"] = asyncio.create_task(radar11.refresh_loop(e11_refresh))
 
 
 class Health(BaseHTTPRequestHandler):
@@ -2148,6 +2517,7 @@ def main():
     app.add_handler(CommandHandler("engine8", cmd_engine8))
     app.add_handler(CommandHandler("engine9", cmd_engine9))
     app.add_handler(CommandHandler("engine10", cmd_engine10))
+    app.add_handler(CommandHandler("engine11", cmd_engine11))
     app.add_handler(CommandHandler("id", cmd_id))
     app.add_handler(CallbackQueryHandler(on_live_cb, pattern=r"^lv:"))
     app.add_handler(CallbackQueryHandler(on_e3_cb, pattern=r"^e3:"))
@@ -2157,6 +2527,7 @@ def main():
     app.add_handler(CallbackQueryHandler(on_e8_cb, pattern=r"^e8:"))
     app.add_handler(CallbackQueryHandler(on_e9_cb, pattern=r"^e9:"))
     app.add_handler(CallbackQueryHandler(on_e10_cb, pattern=r"^e10:"))
+    app.add_handler(CallbackQueryHandler(on_e11_cb, pattern=r"^e11:"))
     otctest.register(app, send, allowed, deny, SCAN_LOCK, lambda: APP.bot)       # /otctest (own command, own handlers)
     app.run_polling(drop_pending_updates=True)
 
