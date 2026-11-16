@@ -293,11 +293,12 @@ def _row_icon(s):
 
 def _day_lists(sigs, hdr):
     """Per date: a header (📅 - 2026.11.16 + divider) and the day's signals in time order, one per row:
-    'M5 USCrude-OTC 03:45 ✅'. Rows are put into <pre> blocks (monospace) of <= 60 rows so a message never cuts a block in half."""
+    'M5 USCrude-OTC 03:45 BUY ✅'. Rows are put into <pre> blocks (monospace) of <= 60 rows so a message never cuts a block in half."""
     width = max(len(pairs.pretty(s["pair"])) for s in sigs)
     out = []
     for d in sorted({s["date"] for s in sigs}):
-        rows = ["M%d %s %02d:%02d %s" % (hdr["tf"], pairs.pretty(s["pair"]).ljust(width), s["hour"], s["minute"], _row_icon(s))
+        rows = ["M%d %s %02d:%02d %s %s" % (hdr["tf"], pairs.pretty(s["pair"]).ljust(width), s["hour"], s["minute"],
+                                           ("BUY" if s["side"] == "G" else "PUT"), _row_icon(s))
                 for s in sorted((x for x in sigs if x["date"] == d), key=lambda x: (x["hour"], x["minute"], x["pair"]))]
         out.append("📅 - %s\n▬▬▬▬▬▬▬▬▬ • ▬▬▬▬▬▬▬▬▬" % d.strftime("%Y.%m.%d"))
         for i in range(0, len(rows), 60):
