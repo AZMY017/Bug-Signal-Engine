@@ -13,6 +13,7 @@ Nothing of the other engines is touched; this file only registers its own comman
 import asyncio
 import csv
 import datetime as dt
+import html
 import io
 import logging
 import os
@@ -281,6 +282,29 @@ def _lv_txt(lv):
     return " • ".join("%s %d" % ("সরাসরি উইন" if k == 0 else "MTG%d উইন" % k, lv[k]) for k in sorted(lv)) or "—"
 
 
+SUP = {1: "¹", 2: "²", 3: "³"}
+
+
+def _row_icon(s):
+    if s["res"] != 1:
+        return "❌"
+    return "✅" + SUP.get(s["lvl"], "") if s["lvl"] else "✅"          # direct win = ✅ only, MTG1 win = ✅¹, MTG2 = ✅², MTG3 = ✅³
+
+
+def _day_lists(sigs, hdr):
+    """Per date: a header (📅 - 2026.11.16 + divider) and the day's signals in time order, one per row:
+    'M5 USCrude-OTC 03:45 ✅'. Rows are put into <pre> blocks (monospace) of <= 60 rows so a message never cuts a block in half."""
+    width = max(len(pairs.pretty(s["pair"])) for s in sigs)
+    out = []
+    for d in sorted({s["date"] for s in sigs}):
+        rows = ["M%d %s %02d:%02d %s" % (hdr["tf"], pairs.pretty(s["pair"]).ljust(width), s["hour"], s["minute"], _row_icon(s))
+                for s in sorted((x for x in sigs if x["date"] == d), key=lambda x: (x["hour"], x["minute"], x["pair"]))]
+        out.append("📅 - %s\n▬▬▬▬▬▬▬▬▬ • ▬▬▬▬▬▬▬▬▬" % d.strftime("%Y.%m.%d"))
+        for i in range(0, len(rows), 60):
+            out.append(("PRE", "<pre>%s</pre>" % html.escape("\n".join(rows[i:i + 60]), quote=False)))
+    return out
+
+
 def summary_texts(sigs, info, hdr, dates, rules, partial_note=True):
     n, w, l, lv = stats(sigs)
     ds = ", ".join(d.strftime("%d %b") for d in dates)
@@ -297,12 +321,9 @@ def summary_texts(sigs, info, hdr, dates, rules, partial_note=True):
             a, b, c_, _ = stats(ss)
             L.append("  %s: %d সিগন্যাল • ✅ %d • ❌ %d%s" % (d.strftime("%d %b"), a, b, c_, (" • %.0f%%" % (100.0 * b / a)) if a else ""))
     if n:
+        # per-day signal list (replaces the old "পেয়ার ধরে" block): date, then  M<tf> PAIR HH:MM ✅ / ✅¹ (MTG1 win) / ❌
         L.append("")
-        L.append("পেয়ার ধরে:")
-        for p in sorted({s["pair"] for s in sigs}):
-            ss = [s for s in sigs if s["pair"] == p]
-            a, b, c_, _ = stats(ss)
-            L.append("  %s: %d • ✅ %d • ❌ %d" % (pairs.pretty(p), a, b, c_))
+        L += _day_lists(sigs, hdr)
         bad = [s for s in sigs if s["res"] == -1]
         if bad:
             L.append("")
@@ -320,13 +341,14 @@ def summary_texts(sigs, info, hdr, dates, rules, partial_note=True):
         notes.append("ℹ️ ক্যান্ডেল না থাকায় %d টা সিগন্যাল বাদ গেছে।" % info["missing"])
     if notes:
         L += [""] + notes
-    txt = "\n".join(L)
+    # the messages are sent with parse_mode="HTML" (the signal rows sit in <pre> = monospace, so the columns line up)
+    ents = [x[1] if isinstance(x, tuple) else html.escape(x, quote=False) for x in L]
     out, cur = [], ""
-    for line in txt.split("\n"):
-        if len(cur) + len(line) + 1 > 3900:
+    for ent in ents:
+        if cur and len(cur) + len(ent) + 1 > 3900:
             out.append(cur)
             cur = ""
-        cur += line + "\n"
+        cur += ent + "\n"
     if cur.strip():
         out.append(cur)
     return out
@@ -450,9 +472,9 @@ async def _job(chat_id, dates, m):
                 await send(dest, fmt_result(s, t))
                 await asyncio.sleep(delay)
         for t in summary_texts(sigs, info, hdr, dates, rules):
-            await send(dest, t)
+            await send(dest, t, parse_mode="HTML")
             if str(dest) != str(chat_id):
-                await send(chat_id, t)
+                await send(chat_id, t, parse_mode="HTML")
         if sigs:
             bio = io.BytesIO(make_csv(sigs))
             bio.name = "%stest_%s.csv" % (PFX[m] if m == "otc" else "real", dt.datetime.now(BDT).strftime("%Y%m%d_%H%M"))
