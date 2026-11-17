@@ -18,21 +18,32 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 
 import engine
 import engine2
-import engine3
-import engine4
-import engine6
-import engine8
-import engine9
 import live
 import oanda
-import otctest
-import radar
-import radar11
-import radar_report
-import radar_report11
 import pairs
 import resultsdb as rdb
 import source
+import importlib
+
+
+def _opt(name):
+    """Optional engine module. Every engine file is self-contained: delete engineN.py (or radar.py ...) from GitHub and only
+    that engine's command disappears - the bot and all other engines keep working."""
+    try:
+        return importlib.import_module(name)
+    except Exception as e:  # noqa
+        logging.getLogger("bot").warning("module %s not loaded (%s) -> its command is OFF", name, e)
+        return None
+
+
+engine3 = _opt("engine3")        # /engine3
+engine4 = _opt("engine4")        # /engine4
+engine6 = _opt("engine6")        # /engine6
+engine8 = _opt("engine8")        # /engine8
+engine9 = _opt("engine9")        # /engine9
+radar = _opt("radar")            # /engine10 (own report code embedded: radar.radar_report)
+radar11 = _opt("radar11")        # /engine11 (own report code embedded: radar11.radar_report11)
+otctest = _opt("otctest")        # /otctest, /realtest
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("bugbot")
@@ -121,8 +132,21 @@ LEGEND = ("✅ = টেস্ট পিরিয়ডেও টিকেছে 
           "সময় UTC+6 • :৪৫ মানে প্রতি ঘণ্টার ৪৫ মিনিটের ক্যান্ডেল • 12–24 = দুপুর ১২টা থেকে রাত ১২টা")
 
 
-def head_cmds():
+def _head_cmds_all():
     return ("/check USDJPY 30 UP 12-24 — একটা নির্দিষ্ট স্লটের হিসাব\n/engine3 — ইঞ্জিন ৩ (মিনিট গ্রিড: G/R টেবিল + উইন রেশিও, PDF/CSV)\n/engine4 — ইঞ্জিন ৪ (ব্যাক-টু-ব্যাক লসের পর সিগন্যাল গোনা)\n/engine6 — ইঞ্জিন ৬ (ইঞ্জিন ৩-এর মতো, কিন্তু গ্রিন/রেড আলাদা চার্ট, একদিনের কম B2B লস আগে)\n/engine8 — ইঞ্জিন ৮ (ইঞ্জিন ৬-এর হিসাব, শুধু টেক্সট: গ্রিন/রেডের সর্বনিম্ন B2B লসের মিনিটগুলো)\n/engine9 — ইঞ্জিন ৯ (ইঞ্জিন ৮-এর মিনিটগুলো সরাসরি ইঞ্জিন ৪-এর সিগন্যাল গণনায়, শুধু টেক্সট)\n/engine10 — ইঞ্জিন ১০ সিগন্যাল রাডার (১০০% উইনের স্লট থেকে লাইভ UP/DOWN অ্যালার্ট + রেজাল্ট)\n/engine11 — ইঞ্জিন ১১ (ইঞ্জিন ১০-এর মতো, সাথে ব্যাক-টেস্ট কোন তারিখ পর্যন্ত হবে সেটা বাছাই: ডাটাবেজের শেষ দিন অথবা কাস্টম তারিখ)\n/live — লাইভ অ্যালার্ট চালু/বন্ধ\n/status — অবস্থা\n/data — ডেটা কভারেজ\n/db — ডাটাবেজ সাইজ + কত দিনের ডেটা জমা (রিয়েল ও OTC)\n/otctest — OTC তালিকা পেস্ট করে কোনো দিনের রিপ্লে টেস্ট\n/realtest — রিয়েল তালিকা পেস্ট করে কোনো দিনের রিপ্লে টেস্ট\n/id — আমার Telegram ID")
+
+
+def head_cmds():
+    """Command list for /start, without the lines of engines whose file is not there."""
+    mods = {"engine3": engine3, "engine4": engine4, "engine6": engine6, "engine8": engine8, "engine9": engine9,
+            "engine10": radar, "engine11": radar11, "otctest": otctest, "realtest": otctest}
+    keep = []
+    for line in _head_cmds_all().split("\n"):
+        m = re.match(r"/(engine\d+|otctest|realtest)\b", line)
+        if m and mods.get(m.group(1)) is None:
+            continue
+        keep.append(line)
+    return "\n".join(keep)
 
 
 # ---------------------------------------------------------------- scan
@@ -776,8 +800,11 @@ E3_PRESETS = (3, 4, 5, 6)          # /engine3 period buttons (+ ✏️ custom); 
 E3_MAX_DAYS = 365
 
 
+E3_PERIOD_DAYS = {1: 30, 2: 60, 3: 90, 6: 180, 12: 365}
+
+
 def e3_label(months):
-    d = engine3.period_days(months)
+    d = E3_PERIOD_DAYS.get(months) or max(1, int(round(months * 30)))      # same rule as engine3.period_days (no engine3.py needed)
     if d == 365:
         return "1Y"
     if d % 30 == 0 and d != 360:
@@ -1063,7 +1090,7 @@ async def e6_job(chat_id, prog, st):
     _miss = data_missing(st["pairs"])
     if _miss:
         return await progress("❌ " + _miss)
-    days = engine3.period_days(st["months"])
+    days = engine6.engine3.period_days(st["months"])
     stamp = dt.datetime.now(pairs.BDT).strftime("%Y%m%d_%H%M")
     missing = []
     try:
@@ -1079,7 +1106,7 @@ async def e6_job(chat_id, prog, st):
                 tag = "%s_M%d_%s" % (pair, st["tf"], stamp)
                 head = "📊 %s • %d মিনিট • %s • %d ট্রেডিং-দিন (%s → %s)" % (
                     pairs.pretty(pair), st["tf"], e3_label(st["months"]), len(res["days"]),
-                    engine3.day_date(res["d0"], res["days"][0]), engine3.day_date(res["d0"], res["days"][-1]))
+                    engine6.engine3.day_date(res["d0"], res["days"][0]), engine6.engine3.day_date(res["d0"], res["days"][-1]))
                 if st["out"] in ("PDF", "BOTH"):
                     await progress("⏳ PDF বানাচ্ছি: %s" % pairs.pretty(pair))
                     bio = await asyncio.to_thread(engine6.make_pdf, res, st["mtg"])
@@ -1265,7 +1292,7 @@ async def e8_job(chat_id, prog, st):
     _miss = data_missing(st["pairs"])
     if _miss:
         return await progress("❌ " + _miss)
-    days = engine3.period_days(st["months"])
+    days = engine8.engine3.period_days(st["months"])
     plist = list(st["pairs"])
     total, sent_any = len(plist), False
     missing = []
@@ -1282,7 +1309,7 @@ async def e8_job(chat_id, prog, st):
                 return None
             head = "📊 %s • %d মিনিট • %s • %d ট্রেডিং-দিন (%s → %s)" % (
                 pairs.pretty(pair), st["tf"], e3_label(st["months"]), len(res["days"]),
-                engine3.day_date(res["d0"], res["days"][0]), engine3.day_date(res["d0"], res["days"][-1]))
+                engine8.engine3.day_date(res["d0"], res["days"][0]), engine8.engine3.day_date(res["d0"], res["days"][-1]))
             texts = engine8.messages(head, engine8.collect(res, st["mtg"]), E3_MTG)
             del res
             return texts
@@ -1462,7 +1489,7 @@ async def e9_job(chat_id, prog, st):
     _miss = data_missing(st["pairs"])
     if _miss:
         return await progress("❌ " + _miss)
-    days = engine3.period_days(st["months"])
+    days = engine9.engine3.period_days(st["months"])
     plist = list(st["pairs"])
     total, sent_any = len(plist), False
     missing = []
@@ -1479,7 +1506,7 @@ async def e9_job(chat_id, prog, st):
                 return None
             head = "🔗 %s • %d মিনিট • %s • %d ট্রেডিং-দিন (%s → %s)" % (
                 pairs.pretty(pair), st["tf"], e3_label(st["months"]), len(res["days"]),
-                engine3.day_date(res["d0"], res["days"][0]), engine3.day_date(res["d0"], res["days"][-1]))
+                engine9.engine3.day_date(res["d0"], res["days"][0]), engine9.engine3.day_date(res["d0"], res["days"][-1]))
             texts = engine9.messages(head, res, E3_MTG, E4_SCOPE[st["scope"]])
             del res
             return texts
@@ -1720,11 +1747,11 @@ async def e10_build(chat_id, prog, st, auto=False):
     stamp = dt.datetime.now(pairs.BDT).strftime("%Y%m%d_%H%M")
     try:
         if st.get("pdf"):
-            bio = await asyncio.to_thread(radar_report.make_pdf, per, st)
+            bio = await asyncio.to_thread(radar.radar_report.make_pdf, per, st)
             bio.name = "engine10_radar_%s.pdf" % stamp
             await APP.bot.send_document(chat_id, bio, caption="সিগন্যাল রাডার: সব ডিটেলস (PDF ইংরেজিতে)")
         if st.get("csv"):
-            s_, g_ = await asyncio.to_thread(radar_report.make_csv, per, st)
+            s_, g_ = await asyncio.to_thread(radar.radar_report.make_csv, per, st)
             await APP.bot.send_document(chat_id, io.BytesIO(s_), filename="engine10_slots_%s.csv" % stamp, caption="স্লট সারসংক্ষেপ (রাডারে আছে/নেই + কারণ)")
             await APP.bot.send_document(chat_id, io.BytesIO(g_), filename="engine10_signals_%s.csv" % stamp, caption="প্রতিটা সিগন্যালের তারিখ ও রেজাল্ট")
     except Exception:  # noqa
@@ -1985,6 +2012,8 @@ def e11_kb():
          Btn(tick(custom, ("📅 কাস্টম: %s" % E11["end"]) if (custom and E11["end"]) else "📅 কাস্টম তারিখ থেকে"), callback_data="e11:src:custom")],
         [Btn(tick(v in E11["mtg"], lb), callback_data="e11:mtg:%d" % v) for v, lb in E3_MTG.items()],
         [Btn(tick(E11["n"] == v, "লস %d" % v), callback_data="e11:n:%d" % v) for v in range(1, 7)],
+        # NEW: custom back-to-back loss count (✏️)
+        [Btn(tick(E11["n"] > 6, "✏️ লস %d (কাস্টম)" % E11["n"] if E11["n"] > 6 else "✏️ লস কাস্টম"), callback_data="e11:n:custom")],
         [Btn(tick(E11["mode"] == v, lb), callback_data="e11:md:%s" % v) for v, lb in E4_MODE.items()],
         [Btn(tick(E11["minsig"] == v, "সি. ≥%d" % v), callback_data="e11:ms:%d" % v) for v in E11_MINSIG_PRESETS]
         + [Btn(tick(E11["minsig"] not in E11_MINSIG_PRESETS, "✏️ সি. ≥%d" % E11["minsig"] if E11["minsig"] not in E11_MINSIG_PRESETS else "✏️"), callback_data="e11:ms:custom")],
@@ -2033,11 +2062,11 @@ async def e11_build(chat_id, prog, st, auto=False):
     stamp = dt.datetime.now(pairs.BDT).strftime("%Y%m%d_%H%M")
     try:
         if st.get("pdf"):
-            bio = await asyncio.to_thread(radar_report11.make_pdf, per, st)
+            bio = await asyncio.to_thread(radar11.radar_report11.make_pdf, per, st)
             bio.name = "engine11_radar_%s.pdf" % stamp
             await APP.bot.send_document(chat_id, bio, caption="সিগন্যাল রাডার ১১: সব ডিটেলস (PDF ইংরেজিতে)")
         if st.get("csv"):
-            s_, g_ = await asyncio.to_thread(radar_report11.make_csv, per, st)
+            s_, g_ = await asyncio.to_thread(radar11.radar_report11.make_csv, per, st)
             await APP.bot.send_document(chat_id, io.BytesIO(s_), filename="engine11_slots_%s.csv" % stamp, caption="স্লট সারসংক্ষেপ (রাডারে আছে/নেই + কারণ)")
             await APP.bot.send_document(chat_id, io.BytesIO(g_), filename="engine11_signals_%s.csv" % stamp, caption="প্রতিটা সিগন্যালের তারিখ ও রেজাল্ট")
     except Exception:  # noqa
@@ -2153,12 +2182,13 @@ async def on_e11_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif key == "src":
         E11["src"] = "db"
         E11["wait"] = False
-    elif key in ("tf", "mo", "ms") and val == "custom":
-        E11["wait"] = {"tf": "tf", "mo": "months", "ms": "minsig"}[key]
+    elif key in ("tf", "mo", "ms", "n") and val == "custom":
+        E11["wait"] = {"tf": "tf", "mo": "months", "ms": "minsig", "n": "nloss"}[key]
         _e11_other_waits_off()
         ask = {"tf": "✏️ টাইম ফ্রেম কত মিনিট চাও লেখো (যেমন: 2, 3, 4, 5, 10, 15)।\nসংখ্যাটা ৬০-কে ভাগ করতে পারে এমন হতে হবে।",
                "mo": "✏️ কত দিনের ব্যাক-টেস্ট চাও লেখো:\n• মাস: 7 অথবা 7M\n• দিন: 45D\n• বছর: 1Y\n(সর্বোচ্চ %d দিন)" % E3_MAX_DAYS,
-               "ms": "✏️ রাডারে ঢুকতে একটা মিনিটে কমপক্ষে কয়টা সিগন্যাল লাগবে লেখো (১ থেকে ৫০)।"}[key]
+               "ms": "✏️ রাডারে ঢুকতে একটা মিনিটে কমপক্ষে কয়টা সিগন্যাল লাগবে লেখো (১ থেকে ৫০)।",
+               "n": "✏️ পরপর (ব্যাক-টু-ব্যাক) কয়টা লস হলে সিগন্যাল নিতে চাও লেখো (১ থেকে ২০)।\nযেমন: 7"}[key]
         await q.message.reply_text(ask)
         return
     elif key == "tf":
@@ -2176,6 +2206,7 @@ async def on_e11_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         v = int(val)
         E11["mtg"] = [x for x in E11["mtg"] if x != v] if v in E11["mtg"] else sorted(E11["mtg"] + [v])
     elif key == "n":
+        E11["wait"] = False
         E11["n"] = int(val)
     elif key == "md":
         E11["mode"] = val
@@ -2192,7 +2223,7 @@ async def on_e11_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 async def on_e11_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Reply to a ✏️ / 📅 prompt of /engine11 (called from on_e3_text): custom date, period, time frame or minimum signals."""
+    """Reply to a ✏️ / 📅 prompt of /engine11 (called from on_e3_text): custom date, period, time frame, loss count or minimum signals."""
     txt = (update.effective_message.text or "").strip().translate(str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789"))
     w = E11["wait"]
     if w == "date":
@@ -2211,6 +2242,11 @@ async def on_e11_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not txt.isdigit() or not (1 <= int(txt) <= 50):
             return await update.effective_message.reply_text("বুঝিনি। ১ থেকে ৫০-এর মধ্যে একটা সংখ্যা লেখো।")
         E11["minsig"] = int(txt)
+    elif w == "nloss":
+        t = txt.lower().replace("লস", "").replace("loss", "").strip()
+        if not t.isdigit() or not (1 <= int(t) <= 20):
+            return await update.effective_message.reply_text("বুঝিনি। ১ থেকে ২০-এর মধ্যে একটা সংখ্যা লেখো (যেমন: 7)।")
+        E11["n"] = int(t)
     else:
         months = e3_parse_period(txt)
         if months is None:
@@ -2241,7 +2277,7 @@ def e4_text():
             "• ঠিক N: পরপর ঠিক N টা লস হওয়ার পর পরের ট্রেডটাই শুধু সিগন্যাল। (N=২, লস-লস-উইন → ৩য় ট্রেড সিগন্যাল। লস-লস-লস-লস হলে ৩য় ট্রেড সিগন্যাল, ৪র্থটা সিগন্যাল না)\n"
             "• N বা বেশি: N বা তার বেশি লস চলতে থাকলে প্রতিটা পরের ট্রেড সিগন্যাল। (N=২, লস-লস-লস-লস → ৩য় ও ৪র্থ দুটোই সিগন্যাল)\n\n"
             "বাছাই করে ▶️ চালাও চাপো। (/engine4 USDJPY লিখলে পেয়ার আগে থেকেই বাছা হবে)" % (
-                E4["tf"], engine3.MODES[E4["mtg"]].replace("No-MTG", "নন-MTG"), E4["n"], E4_MODE[E4["mode"]], E4_SCOPE[E4["scope"]],
+                E4["tf"], engine4.engine3.MODES[E4["mtg"]].replace("No-MTG", "নন-MTG"), E4["n"], E4_MODE[E4["mode"]], E4_SCOPE[E4["scope"]],
                 E4_SIDE[E4["side"]], E3_MONTHS[E4["months"]], E4_OUT[E4["out"]], ps, ms))
 
 
@@ -2293,7 +2329,7 @@ async def e4_job(chat_id, prog, st):
     _miss = data_missing(st["pairs"])
     if _miss:
         return await progress("❌ " + _miss)
-    days = engine3.PERIOD_DAYS[st["months"]]
+    days = engine4.engine3.PERIOD_DAYS[st["months"]]
     stamp = dt.datetime.now(pairs.BDT).strftime("%Y%m%d_%H%M")
     sides = ["G", "R"] if st["side"] == "GR" else [st["side"]]
     missing = []
@@ -2309,9 +2345,9 @@ async def e4_job(chat_id, prog, st):
                     missing.append(pairs.pretty(pair))
                     continue
                 head = "🎯 %s • %d মিনিট • %s • পরপর %d লস (%s, %s) • %s • %d ট্রেডিং-দিন (%s → %s)" % (
-                    pairs.pretty(pair), st["tf"], engine3.MODES[st["mtg"]].replace("No-MTG", "নন-MTG"), st["n"], E4_MODE[st["mode"]],
+                    pairs.pretty(pair), st["tf"], engine4.engine3.MODES[st["mtg"]].replace("No-MTG", "নন-MTG"), st["n"], E4_MODE[st["mode"]],
                     E4_SCOPE[st["scope"]], E3_MONTHS[st["months"]], len(res["days"]),
-                    engine3.day_date(res["d0"], res["days"][0]), engine3.day_date(res["d0"], res["days"][-1]))
+                    engine4.engine3.day_date(res["d0"], res["days"][0]), engine4.engine3.day_date(res["d0"], res["days"][-1]))
                 tag = "%s_M%d_%s" % (pair, st["tf"], stamp)
                 if st["out"] in ("PDF", "BOTH"):
                     await progress("⏳ PDF বানাচ্ছি: %s" % pairs.pretty(pair))
@@ -2435,15 +2471,19 @@ async def auto_scan_loop(app):
 async def post_init(app):
     global APP
     APP = app
-    cmds = [BotCommand("engine3", "ইঞ্জিন ৩: মিনিট গ্রিড (G/R টেবিল, PDF/CSV)"),
-            BotCommand("engine4", "ইঞ্জিন ৪: ব্যাক-টু-ব্যাক লসের পর সিগন্যাল"),
-            BotCommand("engine6", "ইঞ্জিন ৬: গ্রিন/রেড র‍্যাংকড চার্ট (একদিনের কম B2B লস আগে)"),
-            BotCommand("engine8", "ইঞ্জিন ৮: সর্বনিম্ন B2B লসের মিনিট টেক্সটে (গ্রিন/রেড)"),
-            BotCommand("engine9", "ইঞ্জিন ৯: ইঞ্জিন ৮ এর মিনিট সরাসরি ইঞ্জিন ৪ এ (টেক্সট)"),
-            BotCommand("engine10", "ইঞ্জিন ১০: সিগন্যাল রাডার (১০০% স্লটের লাইভ UP/DOWN অ্যালার্ট)"),
-            BotCommand("engine11", "ইঞ্জিন ১১: রাডার + কাস্টম তারিখ/ডাটাবেজ-শেষ থেকে ব্যাক-টেস্ট"),
-            BotCommand("live", "লাইভ অ্যালার্ট"), BotCommand("status", "অবস্থা"), BotCommand("data", "ডেটা কভারেজ"), BotCommand("db", "ডাটাবেজ: সাইজ, কত দিনের ডেটা (রিয়েল + OTC)"), BotCommand("check", "একটা স্লটের হিসাব দেখো"),
-            BotCommand("id", "আমার Telegram ID"), otctest.COMMAND, otctest.COMMAND_REAL]
+    _eng_cmds = [
+        (engine3, BotCommand("engine3", "ইঞ্জিন ৩: মিনিট গ্রিড (G/R টেবিল, PDF/CSV)")),
+        (engine4, BotCommand("engine4", "ইঞ্জিন ৪: ব্যাক-টু-ব্যাক লসের পর সিগন্যাল")),
+        (engine6, BotCommand("engine6", "ইঞ্জিন ৬: গ্রিন/রেড র‍্যাংকড চার্ট (একদিনের কম B2B লস আগে)")),
+        (engine8, BotCommand("engine8", "ইঞ্জিন ৮: সর্বনিম্ন B2B লসের মিনিট টেক্সটে (গ্রিন/রেড)")),
+        (engine9, BotCommand("engine9", "ইঞ্জিন ৯: ইঞ্জিন ৮ এর মিনিট সরাসরি ইঞ্জিন ৪ এ (টেক্সট)")),
+        (radar, BotCommand("engine10", "ইঞ্জিন ১০: সিগন্যাল রাডার (১০০% স্লটের লাইভ UP/DOWN অ্যালার্ট)")),
+        (radar11, BotCommand("engine11", "ইঞ্জিন ১১: রাডার + কাস্টম তারিখ/ডাটাবেজ-শেষ থেকে ব্যাক-টেস্ট")),
+    ]
+    cmds = [c for m, c in _eng_cmds if m is not None] + [BotCommand("live", "লাইভ অ্যালার্ট"), BotCommand("status", "অবস্থা"), BotCommand("data", "ডেটা কভারেজ"), BotCommand("db", "ডাটাবেজ: সাইজ, কত দিনের ডেটা (রিয়েল + OTC)"), BotCommand("check", "একটা স্লটের হিসাব দেখো"),
+            BotCommand("id", "আমার Telegram ID")]
+    if otctest is not None:
+        cmds += [otctest.COMMAND, otctest.COMMAND_REAL]
     try:
         await app.bot.set_my_commands(cmds)
     except Exception:  # noqa
@@ -2452,8 +2492,10 @@ async def post_init(app):
         try:
             await asyncio.to_thread(rdb.init)
             await live.load_state()
-            await radar.load_state()
-            await radar11.load_state()
+            if radar is not None:
+                await radar.load_state()
+            if radar11 is not None:
+                await radar11.load_state()
         except Exception:  # noqa
             log.exception("results database init failed")
     else:
@@ -2466,12 +2508,14 @@ async def post_init(app):
         app.bot_data["auto_scan_task"] = asyncio.create_task(auto_scan_loop(app))
     else:
         log.info("auto scan is OFF (set AUTO_SCAN=on to enable)")
-    app.bot_data["radar_alert_task"] = asyncio.create_task(radar.alert_loop(send))
-    app.bot_data["radar_result_task"] = asyncio.create_task(radar.result_loop(send))
-    app.bot_data["radar_refresh_task"] = asyncio.create_task(radar.refresh_loop(e10_refresh))
-    app.bot_data["radar11_alert_task"] = asyncio.create_task(radar11.alert_loop(send))
-    app.bot_data["radar11_result_task"] = asyncio.create_task(radar11.result_loop(send))
-    app.bot_data["radar11_refresh_task"] = asyncio.create_task(radar11.refresh_loop(e11_refresh))
+    if radar is not None:
+        app.bot_data["radar_alert_task"] = asyncio.create_task(radar.alert_loop(send))
+        app.bot_data["radar_result_task"] = asyncio.create_task(radar.result_loop(send))
+        app.bot_data["radar_refresh_task"] = asyncio.create_task(radar.refresh_loop(e10_refresh))
+    if radar11 is not None:
+        app.bot_data["radar11_alert_task"] = asyncio.create_task(radar11.alert_loop(send))
+        app.bot_data["radar11_result_task"] = asyncio.create_task(radar11.result_loop(send))
+        app.bot_data["radar11_refresh_task"] = asyncio.create_task(radar11.refresh_loop(e11_refresh))
 
 
 class Health(BaseHTTPRequestHandler):
@@ -2511,24 +2555,39 @@ def main():
     app.add_handler(CommandHandler("data", cmd_data))
     app.add_handler(CommandHandler("db", cmd_db))
     app.add_handler(CommandHandler("check", cmd_check))
-    app.add_handler(CommandHandler("engine3", cmd_engine3))
-    app.add_handler(CommandHandler("engine4", cmd_engine4))
-    app.add_handler(CommandHandler("engine6", cmd_engine6))
-    app.add_handler(CommandHandler("engine8", cmd_engine8))
-    app.add_handler(CommandHandler("engine9", cmd_engine9))
-    app.add_handler(CommandHandler("engine10", cmd_engine10))
-    app.add_handler(CommandHandler("engine11", cmd_engine11))
+    if engine3 is not None:
+        app.add_handler(CommandHandler("engine3", cmd_engine3))
+    if engine4 is not None:
+        app.add_handler(CommandHandler("engine4", cmd_engine4))
+    if engine6 is not None:
+        app.add_handler(CommandHandler("engine6", cmd_engine6))
+    if engine8 is not None:
+        app.add_handler(CommandHandler("engine8", cmd_engine8))
+    if engine9 is not None:
+        app.add_handler(CommandHandler("engine9", cmd_engine9))
+    if radar is not None:
+        app.add_handler(CommandHandler("engine10", cmd_engine10))
+    if radar11 is not None:
+        app.add_handler(CommandHandler("engine11", cmd_engine11))
     app.add_handler(CommandHandler("id", cmd_id))
     app.add_handler(CallbackQueryHandler(on_live_cb, pattern=r"^lv:"))
-    app.add_handler(CallbackQueryHandler(on_e3_cb, pattern=r"^e3:"))
+    if engine3 is not None:
+        app.add_handler(CallbackQueryHandler(on_e3_cb, pattern=r"^e3:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_e3_text))
-    app.add_handler(CallbackQueryHandler(on_e4_cb, pattern=r"^e4:"))
-    app.add_handler(CallbackQueryHandler(on_e6_cb, pattern=r"^e6:"))
-    app.add_handler(CallbackQueryHandler(on_e8_cb, pattern=r"^e8:"))
-    app.add_handler(CallbackQueryHandler(on_e9_cb, pattern=r"^e9:"))
-    app.add_handler(CallbackQueryHandler(on_e10_cb, pattern=r"^e10:"))
-    app.add_handler(CallbackQueryHandler(on_e11_cb, pattern=r"^e11:"))
-    otctest.register(app, send, allowed, deny, SCAN_LOCK, lambda: APP.bot)       # /otctest (own command, own handlers)
+    if engine4 is not None:
+        app.add_handler(CallbackQueryHandler(on_e4_cb, pattern=r"^e4:"))
+    if engine6 is not None:
+        app.add_handler(CallbackQueryHandler(on_e6_cb, pattern=r"^e6:"))
+    if engine8 is not None:
+        app.add_handler(CallbackQueryHandler(on_e8_cb, pattern=r"^e8:"))
+    if engine9 is not None:
+        app.add_handler(CallbackQueryHandler(on_e9_cb, pattern=r"^e9:"))
+    if radar is not None:
+        app.add_handler(CallbackQueryHandler(on_e10_cb, pattern=r"^e10:"))
+    if radar11 is not None:
+        app.add_handler(CallbackQueryHandler(on_e11_cb, pattern=r"^e11:"))
+    if otctest is not None:
+        otctest.register(app, send, allowed, deny, SCAN_LOCK, lambda: APP.bot)       # /otctest (own command, own handlers)
     app.run_polling(drop_pending_updates=True)
 
 
