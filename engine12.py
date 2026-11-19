@@ -1567,21 +1567,47 @@ def _row_icon(s):
     return "✅" + SUP.get(s["lvl"], "") if s["lvl"] else "✅"
 
 
-def _day_lists(sigs, st):
-    width = max(len(pairs.pretty(s["pair"])) for s in sigs)
+def _day_messages(sigs, st, d, width):
+    """ONE test day -> list of HTML messages: the date heading + that day's signal rows (timeframe, pair, time, direction, result).
+    A day that does not fit in one message is split; every part repeats the date heading."""
+    rows = ["M%d %s %02d:%02d %s %s" % (st["tf"], pairs.pretty(s["pair"]).ljust(width), s["hour"], s["minute"],
+                                       ("BUY" if s["side"] == "G" else "PUT"), _row_icon(s))
+            for s in sorted((x for x in sigs if x["date"] == d), key=lambda x: (x["hour"], x["minute"], x["pair"]))]
+    head = "📅 - %s\n▬▬▬▬▬▬▬▬▬ • ▬▬▬▬▬▬▬▬▬\n" % d.strftime("%Y.%m.%d")
+    parts, cur, size = [], [], 0
+    for r in rows:
+        if cur and size + len(r) + 1 > 3300:
+            parts.append(cur)
+            cur, size = [], 0
+        cur.append(r)
+        size += len(r) + 1
+    if cur:
+        parts.append(cur)
     out = []
-    for d in sorted({s["date"] for s in sigs}):
-        rows = ["M%d %s %02d:%02d %s %s" % (st["tf"], pairs.pretty(s["pair"]).ljust(width), s["hour"], s["minute"],
-                                           ("BUY" if s["side"] == "G" else "PUT"), _row_icon(s))
-                for s in sorted((x for x in sigs if x["date"] == d), key=lambda x: (x["hour"], x["minute"], x["pair"]))]
-        out.append("📅 - %s\n▬▬▬▬▬▬▬▬▬ • ▬▬▬▬▬▬▬▬▬" % d.strftime("%Y.%m.%d"))
-        for i in range(0, len(rows), 60):
-            out.append(("PRE", "<pre>%s</pre>" % html.escape("\n".join(rows[i:i + 60]), quote=False)))
+    for i, part in enumerate(parts):
+        h = head if len(parts) == 1 else head + "(%d/%d)\n" % (i + 1, len(parts))
+        out.append(h + "<pre>%s</pre>" % html.escape("\n".join(part), quote=False))
+    return out
+
+
+def _pack(lines):
+    """plain lines (escaped here) -> messages <= 3900 chars, sent with parse_mode HTML."""
+    out, cur = [], ""
+    for ln in lines:
+        ln = html.escape(ln, quote=False)
+        if cur and len(cur) + len(ln) + 1 > 3900:
+            out.append(cur)
+            cur = ""
+        cur += ln + "\n"
+    if cur.strip():
+        out.append(cur)
     return out
 
 
 def summary_texts(sigs, info, st, dates, slots):
-    """slots: {date: number of radar slots of that day's list}. Messages are sent with parse_mode HTML."""
+    """Messages are sent with parse_mode HTML, in this order:
+    1) the summary (title, settings, total, win ratio, per-day numbers)  2) ONE message (or more if long) per test day: date + its signals
+    3) the loss list + notes."""
     n, w, l, lv = stats(sigs)
     otc = any(pairs.is_otc(p) for p in st["pairs"])
     L = ["📊 ইঞ্জিন ১২ %s টেস্ট রিপোর্ট • %s" % ("OTC" if otc else "রিয়েল", dates_label(dates)),
@@ -1597,14 +1623,17 @@ def summary_texts(sigs, info, st, dates, slots):
         for d in dates:
             a, b, c_, _ = stats([s for s in sigs if s["date"] == d])
             L.append("  %s: %d সিগন্যাল • ✅ %d • ❌ %d%s" % (d.strftime("%d %b"), a, b, c_, (" • %.0f%%" % (100.0 * b / a)) if a else ""))
-    if n:
-        L.append("")
-        L += _day_lists(sigs, st)
-        bad = [s for s in sigs if s["res"] == -1]
-        if bad:
-            L += ["", "❌ লসগুলো:"]
-            for s in bad:
-                L.append("  %s %02d:%02d %s %s" % (s["date"].strftime("%d %b"), s["hour"], s["minute"], pairs.pretty(s["pair"]), "UP" if s["side"] == "G" else "DOWN"))
+    out = _pack(L)                                              # 1) summary message(s)
+    if n:                                                       # 2) one message per day: date + its signals
+        width = max(len(pairs.pretty(s["pair"])) for s in sigs)
+        for d in sorted({s["date"] for s in sigs}):
+            out += _day_messages(sigs, st, d, width)
+    tail = []                                                   # 3) losses + notes
+    bad = [s for s in sigs if s["res"] == -1]
+    if bad:
+        tail.append("❌ লসগুলো:")
+        for s in bad:
+            tail.append("  %s %02d:%02d %s %s" % (s["date"].strftime("%d %b"), s["hour"], s["minute"], pairs.pretty(s["pair"]), "UP" if s["side"] == "G" else "DOWN"))
     notes = []
     if info["nolist"]:
         notes.append("⚠️ তালিকা বানানোর মতো ডেটা ছিল না: %d টা (পেয়ার/দিন), যেমন %s %s।" % (
@@ -1619,16 +1648,8 @@ def summary_texts(sigs, info, st, dates, slots):
     if info["missing"]:
         notes.append("ℹ️ ক্যান্ডেল না থাকায় %d টা সিগন্যাল বাদ গেছে।" % info["missing"])
     if notes:
-        L += [""] + notes
-    ents = [x[1] if isinstance(x, tuple) else html.escape(x, quote=False) for x in L]
-    out, cur = [], ""
-    for ent in ents:
-        if cur and len(cur) + len(ent) + 1 > 3900:
-            out.append(cur)
-            cur = ""
-        cur += ent + "\n"
-    if cur.strip():
-        out.append(cur)
+        tail += ([""] if tail else []) + notes
+    out += _pack(tail)
     return out
 
 
