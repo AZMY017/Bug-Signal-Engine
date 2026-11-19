@@ -2076,7 +2076,7 @@ async def on_cb(update, ctx):
 
 
 async def on_text(update, ctx):
-    """Group -1 handler: eats a message only while a ✏️ prompt of /engine13 waits for its answer, otherwise lets everything else run."""
+    """Group -5 handler (the first text handler to run; /otctest uses -1, /engine12 uses -2): eats a message only while a ✏️ prompt of /engine13 waits for its answer, otherwise lets everything else run."""
     w = E["wait"]
     if not w:
         return
@@ -2139,14 +2139,14 @@ async def _clear_wait(update, ctx):
 
 
 def register(app, send, allowed, deny, lock, bot_getter):
-    """Called once from bot.py main(): own command (/engine13), callbacks and text handler. Own handler groups (-4 and -1), so the
-    handlers of the other engines (groups -3 and -2) keep working exactly as before."""
+    """Called once from bot.py main(): own command (/engine13), callbacks and text handler. Own handler groups (-5 for text, -4 for the clear-wait
+    handlers) that no other engine uses: PTB runs only ONE handler per group, so a shared group would silently swallow our text."""
     D.update(send=send, allowed=allowed, deny=deny, lock=lock, bot=bot_getter)
     app.add_handler(CommandHandler("engine13", cmd_engine13))
     app.add_handler(CallbackQueryHandler(on_cb, pattern=r"^e13:"))
     app.add_handler(CommandHandler(["engine3", "engine4", "engine6", "engine8", "engine9", "engine10", "engine11", "engine12", "otctest", "realtest"], _clear_wait), group=-4)
     app.add_handler(CallbackQueryHandler(_clear_wait, pattern=r"^(e3|e4|e6|e8|e9|e10|e11|e12|ot|rt):"), group=-4)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text), group=-1)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text), group=-5)
 
 
 COMMAND = BotCommand("engine13", "ইঞ্জিন ১৩: ইঞ্জিন ১২ + EMA ফিল্টার (সেরা EMA সেটিং খোঁজা)")
