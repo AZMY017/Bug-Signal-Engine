@@ -288,13 +288,13 @@ def build_messages(d, rows, width, st_line, day_all=None):
     foot = ["▬▬▬▬▬▬▬▬▬ • ▬▬▬▬▬▬▬▬▬",
             "🏆 Total : %d" % len(rows), "✅ Win: %d" % n["win"]] + _split_lines(n) + ["❌ Loss: %d" % n["loss"],
             "📉 কম পেআউট (পার্সেন্ট দেখানো): %d" % n["low"],
-            "📌 ট্রেড সিগন্যাল: %d (✅ %d + ❌ %d)" % (n["win"] + n["loss"], n["win"], n["loss"])]
+            "ট্রেড সিগন্যাল: %d (✅ %d + ❌ %d)" % (n["win"] + n["loss"], n["win"], n["loss"])]
     if n["nopay"] or n["miss"]:
         foot.append("❔ ডেটা/পেআউট নেই: %d" % (n["nopay"] + n["miss"]))
     foot.append("🎯 উইন রেট: %s" % _rate(n["win"], n["loss"]))
     if day_all is not None:
         a = counts(day_all)
-        foot.append("📅 পুরো দিন (এ পর্যন্ত ফরওয়ার্ড): Total %d • 📌 ট্রেড সিগন্যাল %d • ✅ %d • ❌ %d • 📉 %d • %s" % (
+        foot.append("📅 পুরো দিন (এ পর্যন্ত ফরওয়ার্ড): Total %d • ট্রেড সিগন্যাল %d • ✅ %d • ❌ %d • 📉 %d • %s" % (
             len(day_all), a["win"] + a["loss"], a["win"], a["loss"], a["low"], _rate(a["win"], a["loss"])))
         foot.append("   ✅ ভাগ: " + _split_inline(a))
     foot.append("⚙️ %s • পেআউট ন্যূনতম %s%%" % (st_line, ("%g" % S["pay"])))
@@ -309,26 +309,31 @@ def build_messages(d, rows, width, st_line, day_all=None):
 
 
 def build_summary(per_day, st_line):
-    """per_day = [(date, counts)] -> one HTML message: a block per day + the grand total (wins split by MTG step)."""
+    """per_day = [(date, counts)] -> one HTML message: ONE table row per day + a grand-total row (wins split by MTG step)."""
     tot = dict(win=0, loss=0, low=0, nopay=0, miss=0, w=[0, 0, 0, 0])
-    lines = []
+    one_month = len({(d.year, d.month) for d, _n in per_day}) == 1
+    steps = list(range(S["mtg"] + 1))
+    heads = ["Day", "Tot", "Trd", "W", "L", "Low", "Rate"] + ["N" if k == 0 else "M%d" % k for k in steps]
+    rows = []
     for d, n in per_day:
         for k in ("win", "loss", "low", "nopay", "miss"):
             tot[k] += n[k]
         for i in range(4):
             tot["w"][i] += n["w"][i]
-        lines.append("%s | মোট %d | 📌 ট্রেড %d | ✅ %d | ❌ %d | 📉 %d | %s" % (
-            d.strftime("%m.%d"), sum(n[k] for k in ("win", "loss", "low", "nopay", "miss")), n["win"] + n["loss"], n["win"], n["loss"], n["low"], _rate(n["win"], n["loss"])))
-        lines.append("      ✅ ভাগ: " + _split_inline(n))
-    lines.append("▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬")
-    lines.append("সব মিলিয়ে | মোট %d | 📌 ট্রেড %d | ✅ %d | ❌ %d | 📉 %d | %s" % (
-        sum(tot[k] for k in ("win", "loss", "low", "nopay", "miss")), tot["win"] + tot["loss"], tot["win"], tot["loss"], tot["low"], _rate(tot["win"], tot["loss"])))
-    lines.append("      ✅ ভাগ:")
-    lines.extend(_split_lines(tot))
-    if tot["nopay"] or tot["miss"]:
-        lines.append("❔ ডেটা/পেআউট নেই: %d" % (tot["nopay"] + tot["miss"]))
-    return "📊 সারসংক্ষেপ (%d দিন)\n<pre>%s</pre>\n⚙️ %s • পেআউট ন্যূনতম %s%%" % (
-        len(per_day), html.escape("\n".join(lines), quote=False), html.escape(st_line), "%g" % S["pay"])
+        rows.append([d.strftime("%d" if one_month else "%m.%d"), sum(n[k] for k in ("win", "loss", "low", "nopay", "miss")), n["win"] + n["loss"],
+                     n["win"], n["loss"], n["low"], _rate(n["win"], n["loss"])] + [n["w"][k] for k in steps])
+    allrow = ["All", sum(tot[k] for k in ("win", "loss", "low", "nopay", "miss")), tot["win"] + tot["loss"], tot["win"], tot["loss"], tot["low"],
+              _rate(tot["win"], tot["loss"])] + [tot["w"][k] for k in steps]
+    wd = [max(len(str(r[i])) for r in rows + [allrow, heads]) for i in range(len(heads))]
+
+    def fmt(r):
+        return " ".join(str(v).rjust(wd[i]) for i, v in enumerate(r))
+    head = fmt(heads)
+    lines = [head] + [fmt(r) for r in rows] + ["-" * len(head), fmt(allrow)]
+    legend = "Tot=মোট • Trd=ট্রেড সিগন্যাল (W+L) • W=উইন • L=লস • Low=কম পেআউট • N=নন-MTG • M1/M2=MTG ধাপে উইন"
+    extra = ("\n❔ ডেটা/পেআউট নেই: %d" % (tot["nopay"] + tot["miss"])) if (tot["nopay"] or tot["miss"]) else ""
+    return "📊 সারসংক্ষেপ (%d দিন)\n<pre>%s</pre>\n%s%s\n⚙️ %s • পেআউট ন্যূনতম %s%%" % (
+        len(per_day), html.escape("\n".join(lines), quote=False), html.escape(legend), extra, html.escape(st_line), "%g" % S["pay"])
 
 
 # ---------------------------------------------------------------- Telegram glue
