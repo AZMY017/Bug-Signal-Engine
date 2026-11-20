@@ -248,10 +248,22 @@ def mark(kind, v):
 
 
 def counts(vals):
-    n = dict(win=0, loss=0, low=0, nopay=0, miss=0)
-    for k, _v in vals:
+    n = dict(win=0, loss=0, low=0, nopay=0, miss=0, w=[0, 0, 0, 0])      # n["w"][k] = wins at MTG step k (0 = non-MTG / direct)
+    for k, v in vals:
         n[k] += 1
+        if k == "win" and v is not None and 0 <= v < 4:
+            n["w"][v] += 1
     return n
+
+
+def _split_lines(n):
+    """Win split, one line per step that is active under the current MTG setting."""
+    steps = list(range(S["mtg"] + 1))
+    return ["   %s %s: %d" % ("└" if i == len(steps) - 1 else "├", MTG_LB[k], n["w"][k]) for i, k in enumerate(steps)]
+
+
+def _split_inline(n):
+    return " • ".join("%s %d" % (MTG_LB[k], n["w"][k]) for k in range(S["mtg"] + 1))
 
 
 def _rate(w, l):
@@ -274,7 +286,7 @@ def build_messages(d, rows, width, st_line, day_all=None):
         parts.append(cur)
     n = counts([(k, v) for _it, k, v in rows])
     foot = ["▬▬▬▬▬▬▬▬▬ • ▬▬▬▬▬▬▬▬▬",
-            "🏆 Total : %d" % len(rows), "✅ Win: %d" % n["win"], "❌ Loss: %d" % n["loss"],
+            "🏆 Total : %d" % len(rows), "✅ Win: %d" % n["win"]] + _split_lines(n) + ["❌ Loss: %d" % n["loss"],
             "📉 কম পেআউট (পার্সেন্ট দেখানো): %d" % n["low"]]
     if n["nopay"] or n["miss"]:
         foot.append("❔ ডেটা/পেআউট নেই: %d" % (n["nopay"] + n["miss"]))
@@ -283,6 +295,7 @@ def build_messages(d, rows, width, st_line, day_all=None):
         a = counts(day_all)
         foot.append("📅 পুরো দিন (এ পর্যন্ত ফরওয়ার্ড): Total %d • ✅ %d • ❌ %d • 📉 %d • %s" % (
             len(day_all), a["win"], a["loss"], a["low"], _rate(a["win"], a["loss"])))
+        foot.append("   ✅ ভাগ: " + _split_inline(a))
     foot.append("⚙️ %s • পেআউট ন্যূনতম %s%%" % (st_line, ("%g" % S["pay"])))
     out = []
     for i, part in enumerate(parts):
@@ -295,15 +308,22 @@ def build_messages(d, rows, width, st_line, day_all=None):
 
 
 def build_summary(per_day, st_line):
-    """per_day = [(date, counts)] -> one HTML message: a line per day + the grand total."""
-    tot = dict(win=0, loss=0, low=0, nopay=0, miss=0)
+    """per_day = [(date, counts)] -> one HTML message: a block per day + the grand total (wins split by MTG step)."""
+    tot = dict(win=0, loss=0, low=0, nopay=0, miss=0, w=[0, 0, 0, 0])
     lines = []
     for d, n in per_day:
-        for k in tot:
+        for k in ("win", "loss", "low", "nopay", "miss"):
             tot[k] += n[k]
-        lines.append("%s | মোট %d | ✅ %d | ❌ %d | 📉 %d | %s" % (d.strftime("%m.%d"), sum(n.values()), n["win"], n["loss"], n["low"], _rate(n["win"], n["loss"])))
+        for i in range(4):
+            tot["w"][i] += n["w"][i]
+        lines.append("%s | মোট %d | ✅ %d | ❌ %d | 📉 %d | %s" % (
+            d.strftime("%m.%d"), sum(n[k] for k in ("win", "loss", "low", "nopay", "miss")), n["win"], n["loss"], n["low"], _rate(n["win"], n["loss"])))
+        lines.append("      ✅ ভাগ: " + _split_inline(n))
     lines.append("▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬")
-    lines.append("সব মিলিয়ে | মোট %d | ✅ %d | ❌ %d | 📉 %d | %s" % (sum(tot.values()), tot["win"], tot["loss"], tot["low"], _rate(tot["win"], tot["loss"])))
+    lines.append("সব মিলিয়ে | মোট %d | ✅ %d | ❌ %d | 📉 %d | %s" % (
+        sum(tot[k] for k in ("win", "loss", "low", "nopay", "miss")), tot["win"], tot["loss"], tot["low"], _rate(tot["win"], tot["loss"])))
+    lines.append("      ✅ ভাগ:")
+    lines.extend(_split_lines(tot))
     if tot["nopay"] or tot["miss"]:
         lines.append("❔ ডেটা/পেআউট নেই: %d" % (tot["nopay"] + tot["miss"]))
     return "📊 সারসংক্ষেপ (%d দিন)\n<pre>%s</pre>\n⚙️ %s • পেআউট ন্যূনতম %s%%" % (
