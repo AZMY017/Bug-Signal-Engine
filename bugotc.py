@@ -287,14 +287,15 @@ def build_messages(d, rows, width, st_line, day_all=None):
     n = counts([(k, v) for _it, k, v in rows])
     foot = ["▬▬▬▬▬▬▬▬▬ • ▬▬▬▬▬▬▬▬▬",
             "🏆 Total : %d" % len(rows), "✅ Win: %d" % n["win"]] + _split_lines(n) + ["❌ Loss: %d" % n["loss"],
-            "📉 কম পেআউট (পার্সেন্ট দেখানো): %d" % n["low"]]
+            "📉 কম পেআউট (পার্সেন্ট দেখানো): %d" % n["low"],
+            "📌 ট্রেড সিগন্যাল: %d (✅ %d + ❌ %d)" % (n["win"] + n["loss"], n["win"], n["loss"])]
     if n["nopay"] or n["miss"]:
         foot.append("❔ ডেটা/পেআউট নেই: %d" % (n["nopay"] + n["miss"]))
     foot.append("🎯 উইন রেট: %s" % _rate(n["win"], n["loss"]))
     if day_all is not None:
         a = counts(day_all)
-        foot.append("📅 পুরো দিন (এ পর্যন্ত ফরওয়ার্ড): Total %d • ✅ %d • ❌ %d • 📉 %d • %s" % (
-            len(day_all), a["win"], a["loss"], a["low"], _rate(a["win"], a["loss"])))
+        foot.append("📅 পুরো দিন (এ পর্যন্ত ফরওয়ার্ড): Total %d • 📌 ট্রেড সিগন্যাল %d • ✅ %d • ❌ %d • 📉 %d • %s" % (
+            len(day_all), a["win"] + a["loss"], a["win"], a["loss"], a["low"], _rate(a["win"], a["loss"])))
         foot.append("   ✅ ভাগ: " + _split_inline(a))
     foot.append("⚙️ %s • পেআউট ন্যূনতম %s%%" % (st_line, ("%g" % S["pay"])))
     out = []
@@ -316,12 +317,12 @@ def build_summary(per_day, st_line):
             tot[k] += n[k]
         for i in range(4):
             tot["w"][i] += n["w"][i]
-        lines.append("%s | মোট %d | ✅ %d | ❌ %d | 📉 %d | %s" % (
-            d.strftime("%m.%d"), sum(n[k] for k in ("win", "loss", "low", "nopay", "miss")), n["win"], n["loss"], n["low"], _rate(n["win"], n["loss"])))
+        lines.append("%s | মোট %d | 📌 ট্রেড %d | ✅ %d | ❌ %d | 📉 %d | %s" % (
+            d.strftime("%m.%d"), sum(n[k] for k in ("win", "loss", "low", "nopay", "miss")), n["win"] + n["loss"], n["win"], n["loss"], n["low"], _rate(n["win"], n["loss"])))
         lines.append("      ✅ ভাগ: " + _split_inline(n))
     lines.append("▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬")
-    lines.append("সব মিলিয়ে | মোট %d | ✅ %d | ❌ %d | 📉 %d | %s" % (
-        sum(tot[k] for k in ("win", "loss", "low", "nopay", "miss")), tot["win"], tot["loss"], tot["low"], _rate(tot["win"], tot["loss"])))
+    lines.append("সব মিলিয়ে | মোট %d | 📌 ট্রেড %d | ✅ %d | ❌ %d | 📉 %d | %s" % (
+        sum(tot[k] for k in ("win", "loss", "low", "nopay", "miss")), tot["win"] + tot["loss"], tot["win"], tot["loss"], tot["low"], _rate(tot["win"], tot["loss"])))
     lines.append("      ✅ ভাগ:")
     lines.extend(_split_lines(tot))
     if tot["nopay"] or tot["miss"]:
