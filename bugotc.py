@@ -32,13 +32,15 @@ log = logging.getLogger("bugotc")
 BDT = pairs.BDT
 NMIN = 26 * 60                  # minutes read per pair-day: the day + 2 hours (MTG steps of the last signals)
 WAIT_SECS = 900                 # an unanswered ✏️ prompt expires after 15 minutes
-ARM_SECS = 7200                 # forwarded lists are read for 2 hours after /bugotcchecker (or until another engine is used)
+ARM_SECS = 43200                # forwarded lists are read for 12 hours after /bugotcchecker (or until ⏹ / another engine is used)
+PROMPT_SECS = 1.5               # after a burst of forwarded messages: wait this long, then ask 'finished?' (nothing is checked until the person presses ✅)
 CACHE_TTL, CACHE_MAX = 600, 120
 SUP = {1: "¹", 2: "²", 3: "³"}
 MTG_LB = {0: "নন-MTG", 1: "MTG1", 2: "MTG2", 3: "MTG3"}
 PAY_PRESETS = (70, 75, 80, 85)
 D = {}                          # injected by register(): send, allowed, deny, lock, bot
-S = dict(mtg=1, pay=80.0, wait=False, wait_at=0.0, armed=False, armed_at=0.0, last_date=None, days={})
+S = dict(mtg=1, pay=80.0, wait=False, wait_at=0.0, armed=False, armed_at=0.0, last_date=None, days={}, buf=[], gen=0, task=None, prompt=None)
+_LOCK = []                      # one asyncio.Lock (created on first use): two batches are never processed at the same time
 _CACHE = {}                     # (pair, date) -> (stored_at, open[], close[], payout[])
 
 
@@ -88,6 +90,40 @@ def parse(text):
         seen.add(key)
         items.append(dict(tf=tf, pair=pair, E=hh * 60 + mi, side=side, key=key))
     return dict(date=find_date(text), items=items, skipped_pair=sk_pair, skipped_side=sk_side)
+
+
+def parse_days(text, carry=None):
+    """Multi-day parser. -> dict(segs=[[date|None, [items]], ...], skipped_pair, skipped_side).
+    A line with a date (e.g. '📅 - 2026.11.14') switches the current date; rows that come before any date in this text
+    (a continuation like '(2/2)' without a date) use `carry` = the date of the previous message."""
+    text = (text or "").replace("\ufe0f", "").translate(BN)
+    cur, segs, seen, sk_pair, sk_side = carry, [], set(), 0, 0
+    for ln in text.splitlines():
+        m = LINE_RE.match(ln)
+        if not m:
+            d = find_date(ln)
+            if d:
+                cur = d
+            continue
+        tf, name, hh, mi, side = int(m.group(1)), m.group(2), int(m.group(3)), int(m.group(4)), (m.group(5) or "").upper()
+        if not (1 <= tf <= 30 and 60 % tf == 0 and 0 <= hh < 24 and 0 <= mi < 60):
+            continue
+        pair = pairs.norm(name + "-OTC")
+        if not pair or not pairs.is_otc(pair):
+            sk_pair += 1
+            continue
+        side = {"UP": "BUY", "CALL": "BUY", "DOWN": "PUT"}.get(side, side)
+        if side not in ("BUY", "PUT"):
+            sk_side += 1
+            continue
+        key = (tf, pair, hh * 60 + mi, side)
+        if (cur, key) in seen:
+            continue
+        seen.add((cur, key))
+        if not segs or segs[-1][0] != cur:
+            segs.append([cur, []])
+        segs[-1][1].append(dict(tf=tf, pair=pair, E=hh * 60 + mi, side=side, key=key))
+    return dict(segs=segs, skipped_pair=sk_pair, skipped_side=sk_side)
 
 
 # ---------------------------------------------------------------- database (read-only): candles.payout / open / close
@@ -258,6 +294,22 @@ def build_messages(d, rows, width, st_line, day_all=None):
     return out
 
 
+def build_summary(per_day, st_line):
+    """per_day = [(date, counts)] -> one HTML message: a line per day + the grand total."""
+    tot = dict(win=0, loss=0, low=0, nopay=0, miss=0)
+    lines = []
+    for d, n in per_day:
+        for k in tot:
+            tot[k] += n[k]
+        lines.append("%s | মোট %d | ✅ %d | ❌ %d | 📉 %d | %s" % (d.strftime("%m.%d"), sum(n.values()), n["win"], n["loss"], n["low"], _rate(n["win"], n["loss"])))
+    lines.append("▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬")
+    lines.append("সব মিলিয়ে | মোট %d | ✅ %d | ❌ %d | 📉 %d | %s" % (sum(tot.values()), tot["win"], tot["loss"], tot["low"], _rate(tot["win"], tot["loss"])))
+    if tot["nopay"] or tot["miss"]:
+        lines.append("❔ ডেটা/পেআউট নেই: %d" % (tot["nopay"] + tot["miss"]))
+    return "📊 সারসংক্ষেপ (%d দিন)\n<pre>%s</pre>\n⚙️ %s • পেআউট ন্যূনতম %s%%" % (
+        len(per_day), html.escape("\n".join(lines), quote=False), html.escape(st_line), "%g" % S["pay"])
+
+
 # ---------------------------------------------------------------- Telegram glue
 def _tick(on, label):
     return ("✅ " if on else "") + label
@@ -266,7 +318,7 @@ def _tick(on, label):
 def text_main():
     on = S["armed"] and time.time() - S["armed_at"] < ARM_SECS
     return ("🧾 বাগ OTC চেকার\n\n"
-            "/engine14-এর দিনের মেসেজ (📅 তারিখসহ) এখানে ফরওয়ার্ড করো। প্রতিটা সিগন্যালের ওই মিনিটের পেআউট % ডাটাবেজ থেকে দেখে:\n"
+            "/engine14-এর দিনের মেসেজ (📅 তারিখসহ) এখানে ফরওয়ার্ড করো — একসাথে অনেক মেসেজ/অনেক দিন ফরওয়ার্ড বা পেস্ট করা যায় (তারিখ না থাকলে আগের মেসেজের তারিখ ধরা হয়)। পাঠানো শেষ হলে বট জিজ্ঞেস করবে — ✅ চাপলে সব একবারে হিসাব হবে। প্রতিটা সিগন্যালের ওই মিনিটের পেআউট %% ডাটাবেজ থেকে দেখে:\n"
             "• পেআউট ≥ %g%% → রেজাল্ট: ✅ সরাসরি, ✅¹ ✅² ✅³ MTG ধাপে উইন, ❌ লস\n"
             "• পেআউট < %g%% → রেজাল্টের জায়গায় পার্সেন্ট (যেমন 77%%), উইন/লসে গোনা হয় না\n\n"
             "MTG: %s • পেআউট ন্যূনতম: %g%%\n%s") % (
@@ -305,11 +357,40 @@ async def on_cb(update, ctx):
         return
     elif key == "pay":
         S["pay"], S["wait"] = float(val), False
+    elif key == "go":
+        if not S["buf"]:
+            try:
+                await q.edit_message_text("ℹ️ হিসাব করার মতো জমা করা লিস্ট নেই। লিস্ট ফরওয়ার্ড করো।")
+            except BadRequest:
+                pass
+            return
+        S["prompt"] = None
+        try:
+            await q.message.delete()
+        except Exception:  # noqa
+            pass
+        S["task"] = asyncio.create_task(_run_go(q.message.chat_id))     # runs in the background so the bot keeps reading messages
+        return
+    elif key == "cancel":
+        S["buf"].clear()
+        S["gen"] += 1
+        S["prompt"] = None
+        try:
+            await q.edit_message_text("🗑 জমা করা লিস্ট মুছে ফেলা হলো।")
+        except BadRequest:
+            pass
+        return
     elif key == "clr":
         S["days"].clear()
+        S["buf"].clear()
+        S["gen"] += 1
         S["last_date"] = None
+        await _drop_prompt()
     elif key == "off":
         S["armed"], S["wait"] = False, False
+        S["buf"].clear()
+        S["gen"] += 1
+        await _drop_prompt()
     try:
         await q.edit_message_text(text_main(), reply_markup=kb_main())
     except BadRequest:
@@ -342,7 +423,8 @@ async def on_text(update, ctx):
             raise ApplicationHandlerStop
     if not S["armed"] or now - S["armed_at"] > ARM_SECS or not D["allowed"](update):
         return
-    if not p["items"]:
+    pd = parse_days(msg.text, S["last_date"])
+    if not any(items for _d, items in pd["segs"]):
         d = find_date(msg.text.translate(BN))
         if d and len(msg.text) < 60:                    # just a date typed/forwarded: remember it for the next lists
             S["last_date"] = d
@@ -350,29 +432,105 @@ async def on_text(update, ctx):
             raise ApplicationHandlerStop
         return
     S["armed_at"] = now
-    d = p["date"] or S["last_date"]
-    if d is None:
+    if any(d is None for d, _items in pd["segs"]):
         await msg.reply_text("📅 এই মেসেজে তারিখ পাইনি। আগে তারিখসহ মেসেজ ফরওয়ার্ড করো, অথবা শুধু তারিখ লেখো (যেমন 2026-11-13), তারপর লিস্ট দাও।")
         raise ApplicationHandlerStop
-    S["last_date"] = d
-    chat_id = update.effective_chat.id
-    prog = await D["send"](chat_id, "⏳ %d টা সিগন্যালের পেআউট ও ক্যান্ডেল দেখছি…" % len(p["items"]))
+    S["last_date"] = pd["segs"][-1][0]                  # a following message without a date continues this date
+    S["buf"].append(pd)
+    S["gen"] += 1
+    S["task"] = asyncio.create_task(_show_prompt(S["gen"], update.effective_chat.id))
+    raise ApplicationHandlerStop
+
+
+def _pending():
+    """-> (messages, sorted dates, unique signals) of the collected-but-not-yet-checked lists."""
+    per = {}
+    for b in S["buf"]:
+        for d, items in b["segs"]:
+            per.setdefault(d, set()).update(it["key"] for it in items)
+    return len(S["buf"]), sorted(per), sum(len(v) for v in per.values())
+
+
+async def _drop_prompt():
+    pr, S["prompt"] = S["prompt"], None
+    if pr:
+        try:
+            await D["bot"]().delete_message(*pr)
+        except Exception:  # noqa
+            pass
+
+
+async def _show_prompt(gen, chat_id):
+    """After the last forwarded message of a burst: ONE 'finished?' message (always at the bottom of the chat) with the buttons."""
     try:
-        data, err = await asyncio.to_thread(load_all, {(it["pair"], d) for it in p["items"]})
-        rows = [(it,) + evaluate(it, data.get((it["pair"], d)), S["mtg"], S["pay"]) for it in p["items"]]
-        day = S["days"].setdefault(d, {})
-        for it, k, v in rows:
-            day[it["key"]] = (k, v)
-        width = max(len(pairs.pretty(it["pair"])) for it in p["items"])
-        day_all = [kv for kv in day.values()] if len(day) > len(rows) else None
-        texts = build_messages(d, rows, width, MTG_LB[S["mtg"]], day_all)
-        for t in texts:
-            await D["send"](chat_id, t, parse_mode="HTML")
+        await asyncio.sleep(PROMPT_SECS)
+        if gen != S["gen"] or not S["buf"]:
+            return                                      # a newer message came (its own timer will ask) or the list was cleared
+        n, dates, total = _pending()
+        await _drop_prompt()
+        ds = ", ".join(d.strftime("%m.%d") for d in dates[:8]) + (" …" if len(dates) > 8 else "")
+        text = ("📥 জমা হয়েছে: %d টা মেসেজ • %d দিন (%s) • %d টা সিগন্যাল\n\n"
+                "লিস্ট পাঠানো শেষ হয়েছে? শেষ হলে নিচের বাটন চাপো। না চাপলে ধরে নেব আরও পাঠাবে — জমা থাকবে।") % (n, len(dates), ds, total)
+        kb = Markup([[Btn("✅ হ্যাঁ, শেষ — হিসাব করো", callback_data="bo:go:0")], [Btn("🗑 জমা মুছে ফেলো", callback_data="bo:cancel:0")]])
+        m = await D["send"](chat_id, text, reply_markup=kb)
+        if m is not None and gen == S["gen"]:
+            S["prompt"] = (chat_id, m.message_id)
+        elif m is not None:                             # raced with a newer message: remove this stale prompt
+            try:
+                await D["bot"]().delete_message(chat_id, m.message_id)
+            except Exception:  # noqa
+                pass
+    except Exception:  # noqa
+        log.exception("bugotc prompt failed")
+
+
+async def _run_go(chat_id):
+    try:
+        if not _LOCK:
+            _LOCK.append(asyncio.Lock())
+        async with _LOCK[0]:
+            await _process(chat_id)
+    except Exception as e:  # noqa
+        log.exception("bugotc go failed")
+        await D["send"](chat_id, "❌ বাগ OTC চেকার হয়নি: %s" % e)
+
+
+async def _process(chat_id):
+    buf, S["buf"] = S["buf"], []
+    if not buf:
+        return
+    per = {}                                            # date -> {key: item}  (same day in several messages = one list)
+    for b in buf:
+        for d, items in b["segs"]:
+            day_items = per.setdefault(d, {})
+            for it in items:
+                day_items.setdefault(it["key"], it)
+    dates = sorted(per)
+    total = sum(len(v) for v in per.values())
+    sk_pair = sum(b["skipped_pair"] for b in buf)
+    sk_side = sum(b["skipped_side"] for b in buf)
+    prog = await D["send"](chat_id, "⏳ %d টা মেসেজ • %d দিন • %d টা সিগন্যালের পেআউট ও ক্যান্ডেল দেখছি…" % (len(buf), len(dates), total))
+    try:
+        data, err = await asyncio.to_thread(load_all, {(it["pair"], d) for d in dates for it in per[d].values()})
+        per_day = []
+        for d in dates:
+            its = list(per[d].values())
+            rows = [(it,) + evaluate(it, data.get((it["pair"], d)), S["mtg"], S["pay"]) for it in its]
+            day = S["days"].setdefault(d, {})
+            for it, k, v in rows:
+                day[it["key"]] = (k, v)
+            width = max(len(pairs.pretty(it["pair"])) for it in its)
+            day_all = [kv for kv in day.values()] if len(day) > len(rows) else None
+            for t in build_messages(d, rows, width, MTG_LB[S["mtg"]], day_all):
+                await D["send"](chat_id, t, parse_mode="HTML")
+            per_day.append((d, counts([(k, v) for _it, k, v in rows])))
+        if len(per_day) > 1:
+            await D["send"](chat_id, build_summary(per_day, MTG_LB[S["mtg"]]), parse_mode="HTML")
         notes = []
-        if p["skipped_pair"]:
-            notes.append("%d টা লাইনের পেয়ার চিনিনি" % p["skipped_pair"])
-        if p["skipped_side"]:
-            notes.append("%d টা লাইনে BUY/PUT নেই" % p["skipped_side"])
+        if sk_pair:
+            notes.append("%d টা লাইনের পেয়ার চিনিনি" % sk_pair)
+        if sk_side:
+            notes.append("%d টা লাইনে BUY/PUT নেই" % sk_side)
         if err:
             notes.append("ডাটাবেজ সমস্যা: %s" % err)
         if notes:
@@ -386,12 +544,14 @@ async def on_text(update, ctx):
                 await prog.delete()
             except Exception:  # noqa
                 pass
-    raise ApplicationHandlerStop
 
 
 async def _clear_wait(update, ctx):
     """Another engine's command / button was used: forget a pending ✏️ prompt and stop reading forwarded lists (does not stop the other handler)."""
     S["wait"], S["armed"] = False, False
+    S["buf"].clear()
+    S["gen"] += 1
+    await _drop_prompt()
 
 
 def register(app, send, allowed, deny, lock, bot_getter):
