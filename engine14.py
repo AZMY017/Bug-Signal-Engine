@@ -1244,6 +1244,7 @@ import source
 log = logging.getLogger("engine14")
 BDT = pairs.BDT
 OFF = engine3.OFF
+SHOW_SHORT_WARN = False             # Engine 14: no '⚠️ X: N দিনের ডেটা চেয়েছিলে, ডাটাবেজে পেয়েছি ...' lines (set True to bring them back)
 MAX_DAYS = 7                       # most test days in one run
 E3_MAX_DAYS = 365
 WAIT_SECS = 900                    # a ✏️ prompt that nobody answers expires after 15 minutes
@@ -1478,7 +1479,7 @@ def compute_pair(pair, dates, st, data=None):
         first_have = int((first_ts + OFF) // 86400) - res["d0"]
         first_want = int(res["days"][-1]) - days_n + 1
         short = None
-        if first_have - first_want > 3:                             # > 3 days missing (weekend gaps are not counted)
+        if SHOW_SHORT_WARN and first_have - first_want > 3:                             # > 3 days missing (weekend gaps are not counted)
             short = dict(want=days_n, got=int(res["days"][-1]) - int(res["days"][0]) + 1)
         rules = rules_from(res, st["minsig"])
         out["lists"][d] = dict(rules=rules, days=len(res["days"]), short=short,
@@ -2005,9 +2006,9 @@ def register(app, send, allowed, deny, lock, bot_getter):
     D.update(send=send, allowed=allowed, deny=deny, lock=lock, bot=bot_getter)
     app.add_handler(CommandHandler("engine14", cmd_engine14))
     app.add_handler(CallbackQueryHandler(on_cb, pattern=r"^e14:"))
-    app.add_handler(CommandHandler(["engine3", "engine4", "engine6", "engine8", "engine9", "engine10", "engine11", "engine12", "engine13", "otctest", "realtest"], _clear_wait), group=-3)
-    app.add_handler(CallbackQueryHandler(_clear_wait, pattern=r"^(e3|e4|e6|e8|e9|e10|e11|e12|e13|ot|rt):"), group=-3)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text), group=-2)
+    app.add_handler(CommandHandler(["engine3", "engine4", "engine6", "engine8", "engine9", "engine10", "engine11", "engine12", "engine13", "otctest", "realtest"], _clear_wait), group=-6)
+    app.add_handler(CallbackQueryHandler(_clear_wait, pattern=r"^(e3|e4|e6|e8|e9|e10|e11|e12|e13|ot|rt):"), group=-6)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text), group=-7)
 
 
 COMMAND = BotCommand("engine14", "ইঞ্জিন ১৪: অটো ব্যাক-টেস্ট + রিপ্লে টেস্ট (কপি-পেস্ট ছাড়া)")
