@@ -1,0 +1,408 @@
+"""Bug OTC Checker — /bugotcchecker (own file; every engine and /otctest stay untouched, nothing is imported from them).
+
+What it does: you forward (or paste) the day list that /engine14 (or /engine12) sent — the message with the date heading and the rows
+    M1 USDEGP-OTC 03:28 PUT ✅
+For every row the bot reads, from the candles stored in Neon (candles.payout / open / close, read-only):
+  * the PAYOUT % of that pair at the entry minute;
+  * if payout >= the minimum (default 80 %)  -> the result is re-checked on the candles: ✅ (direct win), ✅¹ ✅² ✅³ (won at MTG step 1/2/3), ❌ (loss);
+  * if payout <  the minimum                 -> NO result, the payout is written instead (e.g. 77%), and it is not counted as win/loss.
+Then it sends the list back in the same style as the Quantex bot: date heading, the rows, Total / Win / Loss.
+
+Rules (same as the engines): the pasted ✅/❌ are never trusted, the result is recomputed from the candles; a doji candle counts as a win;
+a missing candle gives no result (❔). Times are BDT (UTC+6) = the way the OTC databases store time.
+Settings (buttons of /bugotcchecker): MTG level (No-MTG / MTG1 / MTG2 / MTG3, default MTG1) and the minimum payout (default 80 %, any number by ✏️).
+"""
+import asyncio
+import datetime as dt
+import html
+import logging
+import re
+import time
+from concurrent.futures import ThreadPoolExecutor
+
+import numpy as np
+from telegram import BotCommand, InlineKeyboardButton as Btn, InlineKeyboardMarkup as Markup
+from telegram.error import BadRequest
+from telegram.ext import ApplicationHandlerStop, CallbackQueryHandler, CommandHandler, MessageHandler, filters
+
+import pairs
+import source
+
+log = logging.getLogger("bugotc")
+BDT = pairs.BDT
+NMIN = 26 * 60                  # minutes read per pair-day: the day + 2 hours (MTG steps of the last signals)
+WAIT_SECS = 900                 # an unanswered ✏️ prompt expires after 15 minutes
+ARM_SECS = 7200                 # forwarded lists are read for 2 hours after /bugotcchecker (or until another engine is used)
+CACHE_TTL, CACHE_MAX = 600, 120
+SUP = {1: "¹", 2: "²", 3: "³"}
+MTG_LB = {0: "নন-MTG", 1: "MTG1", 2: "MTG2", 3: "MTG3"}
+PAY_PRESETS = (70, 75, 80, 85)
+D = {}                          # injected by register(): send, allowed, deny, lock, bot
+S = dict(mtg=1, pay=80.0, wait=False, wait_at=0.0, armed=False, armed_at=0.0, last_date=None, days={})
+_CACHE = {}                     # (pair, date) -> (stored_at, open[], close[], payout[])
+
+
+# ---------------------------------------------------------------- parsing
+LINE_RE = re.compile(r"^\s*M(\d{1,2})\s+([A-Za-z0-9]+)\s*[-_]\s*OTC\s+(\d{1,2}):(\d{2})(?!\d)\s*(BUY|PUT|UP|DOWN|CALL)?", re.I)
+DATE_YMD = re.compile(r"(?<!\d)(\d{4})\s*[-./]\s*(\d{1,2})\s*[-./]\s*(\d{1,2})(?!\d)")
+DATE_DMY = re.compile(r"(?<!\d)(\d{1,2})\s*[-./]\s*(\d{1,2})\s*[-./]\s*(\d{4})(?!\d)")
+BN = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
+
+
+def find_date(text):
+    cands = []
+    for m in DATE_YMD.finditer(text):
+        cands.append((m.start(), (int(m.group(1)), int(m.group(2)), int(m.group(3)))))
+    for m in DATE_DMY.finditer(text):
+        cands.append((m.start(), (int(m.group(3)), int(m.group(2)), int(m.group(1)))))
+    for _p, (y, mo, d) in sorted(cands):
+        try:
+            return dt.date(y, mo, d)
+        except ValueError:
+            continue
+    return None
+
+
+def parse(text):
+    """-> dict(date or None, items=[dict(tf, pair, name, E (minute of day), side BUY|PUT)], skipped_pair, skipped_side)."""
+    text = (text or "").replace("\ufe0f", "").translate(BN)
+    items, seen, sk_pair, sk_side = [], set(), 0, 0
+    for ln in text.splitlines():
+        m = LINE_RE.match(ln)
+        if not m:
+            continue
+        tf, name, hh, mi, side = int(m.group(1)), m.group(2), int(m.group(3)), int(m.group(4)), (m.group(5) or "").upper()
+        if not (1 <= tf <= 30 and 60 % tf == 0 and 0 <= hh < 24 and 0 <= mi < 60):
+            continue
+        pair = pairs.norm(name + "-OTC")
+        if not pair or not pairs.is_otc(pair):
+            sk_pair += 1
+            continue
+        side = {"UP": "BUY", "CALL": "BUY", "DOWN": "PUT"}.get(side, side)
+        if side not in ("BUY", "PUT"):
+            sk_side += 1
+            continue
+        key = (tf, pair, hh * 60 + mi, side)
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(dict(tf=tf, pair=pair, E=hh * 60 + mi, side=side, key=key))
+    return dict(date=find_date(text), items=items, skipped_pair=sk_pair, skipped_side=sk_side)
+
+
+# ---------------------------------------------------------------- database (read-only): candles.payout / open / close
+def _window(d):
+    lo = dt.datetime.combine(d, dt.time(0, 0))      # the OTC databases store naive Dhaka (UTC+6) local time
+    return lo, lo + dt.timedelta(minutes=NMIN)
+
+
+def _to_arrays(rows, lo):
+    o, c, p = (np.full(NMIN, np.nan) for _ in range(3))
+    for ts, op, cl, pay in rows:
+        i = int((ts - lo).total_seconds() // 60)
+        if 0 <= i < NMIN:
+            o[i] = np.nan if op is None else op
+            c[i] = np.nan if cl is None else cl
+            p[i] = np.nan if pay is None else pay
+    return o, c, p
+
+
+_SQL = "SELECT ts, open::float8, close::float8, payout::float8 FROM candles WHERE pair=%s AND ts>=%s AND ts<%s ORDER BY ts"
+
+
+def _fetch_group(i, keys):
+    """One reused connection to database i -> {(pair, date): arrays or None when that database has no rows for it}."""
+    out = {}
+    with source._otc_conn(i) as con:
+        for pair, d in keys:
+            lo, hi = _window(d)
+            rows = con.execute(_SQL, (pair, lo, hi)).fetchall()
+            out[(pair, d)] = _to_arrays(rows, lo) if rows else None
+    return out
+
+
+def load_all(keys):
+    """keys = set of (pair, date) -> ({key: (open[], close[], payout[]) or None}, error text). A few databases are read in parallel."""
+    res, err = {}, ""
+    now = time.time()
+    todo = []
+    for k in keys:
+        e = _CACHE.get(k)
+        if e and now - e[0] < CACHE_TTL:
+            res[k] = e[1:]
+        else:
+            todo.append(k)
+    if not todo:
+        return res, err
+    n = len(source.OTC_URLS)
+    if n == 0:
+        return res, "OTC_DATABASE_URL_* সেট করা নেই"
+    groups = {}
+    for k in todo:
+        guess = pairs.OTC_PAIRS.index(k[0]) % n if k[0] in pairs.OTC_PAIRS else 0
+        groups.setdefault(guess, []).append(k)
+    got = {}
+    with ThreadPoolExecutor(max_workers=max(1, min(3, len(groups)))) as ex:
+        futs = {ex.submit(_fetch_group, i, ks): i for i, ks in groups.items()}
+        for f, i in futs.items():
+            try:
+                got.update(f.result())
+            except Exception as e:  # noqa
+                log.exception("bugotc load failed (db %d)", i)
+                err = str(e)[:120]
+    for k in todo:                                   # a pair that is not on its guessed database: try the others (cheap, indexed by pair)
+        if got.get(k) is None:
+            guess = pairs.OTC_PAIRS.index(k[0]) % n if k[0] in pairs.OTC_PAIRS else 0
+            for i in [x for x in range(n) if x != guess]:
+                try:
+                    r = _fetch_group(i, [k]).get(k)
+                except Exception as e:  # noqa
+                    err = str(e)[:120]
+                    continue
+                if r is not None:
+                    got[k] = r
+                    break
+    for k in todo:
+        res[k] = got.get(k)
+        if got.get(k) is not None:
+            _CACHE[k] = (time.time(),) + got[k]
+    while len(_CACHE) > CACHE_MAX:
+        _CACHE.pop(next(iter(_CACHE)))
+    return res, err
+
+
+# ---------------------------------------------------------------- the check of ONE signal
+def _pay_pct(x):
+    if x is None or x != x:
+        return None
+    return x * 100.0 if x <= 1.5 else float(x)        # stored as % (77); a fraction (0.77) is converted
+
+
+def evaluate(it, arr, mtg, pay_min):
+    """-> ('win', step) | ('loss', None) | ('low', payout %) | ('nopay', None) | ('miss', None)."""
+    if arr is None:
+        return "miss", None
+    o, c, p = arr
+    E, tf = it["E"], it["tf"]
+    pay = _pay_pct(p[E]) if E < NMIN else None
+    if pay is None:
+        return "nopay", None
+    if pay < pay_min:
+        return "low", pay
+    want = 1 if it["side"] == "BUY" else -1
+    for k in range(mtg + 1):
+        a = E + k * tf
+        b = a + tf - 1
+        if b >= NMIN or np.isnan(o[a:b + 1]).any() or np.isnan(c[a:b + 1]).any():
+            return "miss", None                        # a candle is missing: no result is guessed
+        d = np.sign(c[b] - o[a])
+        if d == want or d == 0:                        # doji = win (same as the engines)
+            return "win", k
+    return "loss", None
+
+
+def mark(kind, v):
+    if kind == "win":
+        return "✅" + SUP.get(v, "")
+    if kind == "loss":
+        return "❌"
+    if kind == "low":
+        return "%d%%" % int(round(v))
+    return "❔"
+
+
+def counts(vals):
+    n = dict(win=0, loss=0, low=0, nopay=0, miss=0)
+    for k, _v in vals:
+        n[k] += 1
+    return n
+
+
+def _rate(w, l):
+    return "%.0f%%" % (100.0 * w / (w + l)) if w + l else "-"
+
+
+def build_messages(d, rows, width, st_line, day_all=None):
+    """rows = [(it, kind, v)] of THIS forwarded message -> list of HTML messages (<= ~3300 chars of rows each)."""
+    lines = ["M%d %s %02d:%02d %s %s" % (it["tf"], pairs.pretty(it["pair"]).ljust(width), it["E"] // 60, it["E"] % 60, it["side"], mark(k, v))
+             for it, k, v in rows]
+    head = "📅 - %s\n▬▬▬▬▬▬▬▬▬ • ▬▬▬▬▬▬▬▬▬\n" % d.strftime("%Y.%m.%d")
+    parts, cur, size = [], [], 0
+    for r in lines:
+        if cur and size + len(r) + 1 > 3300:
+            parts.append(cur)
+            cur, size = [], 0
+        cur.append(r)
+        size += len(r) + 1
+    if cur:
+        parts.append(cur)
+    n = counts([(k, v) for _it, k, v in rows])
+    foot = ["▬▬▬▬▬▬▬▬▬ • ▬▬▬▬▬▬▬▬▬",
+            "🏆 Total : %d" % len(rows), "✅ Win: %d" % n["win"], "❌ Loss: %d" % n["loss"],
+            "📉 কম পেআউট (পার্সেন্ট দেখানো): %d" % n["low"]]
+    if n["nopay"] or n["miss"]:
+        foot.append("❔ ডেটা/পেআউট নেই: %d" % (n["nopay"] + n["miss"]))
+    foot.append("🎯 উইন রেট: %s" % _rate(n["win"], n["loss"]))
+    if day_all is not None:
+        a = counts(day_all)
+        foot.append("📅 পুরো দিন (এ পর্যন্ত ফরওয়ার্ড): Total %d • ✅ %d • ❌ %d • 📉 %d • %s" % (
+            len(day_all), a["win"], a["loss"], a["low"], _rate(a["win"], a["loss"])))
+    foot.append("⚙️ %s • পেআউট ন্যূনতম %s%%" % (st_line, ("%g" % S["pay"])))
+    out = []
+    for i, part in enumerate(parts):
+        h = head if len(parts) == 1 else head + "(%d/%d)\n" % (i + 1, len(parts))
+        body = h + "<pre>%s</pre>" % html.escape("\n".join(part), quote=False)
+        if i == len(parts) - 1:
+            body += "\n" + html.escape("\n".join(foot), quote=False)
+        out.append(body)
+    return out
+
+
+# ---------------------------------------------------------------- Telegram glue
+def _tick(on, label):
+    return ("✅ " if on else "") + label
+
+
+def text_main():
+    on = S["armed"] and time.time() - S["armed_at"] < ARM_SECS
+    return ("🧾 বাগ OTC চেকার\n\n"
+            "/engine14-এর দিনের মেসেজ (📅 তারিখসহ) এখানে ফরওয়ার্ড করো। প্রতিটা সিগন্যালের ওই মিনিটের পেআউট % ডাটাবেজ থেকে দেখে:\n"
+            "• পেআউট ≥ %g%% → রেজাল্ট: ✅ সরাসরি, ✅¹ ✅² ✅³ MTG ধাপে উইন, ❌ লস\n"
+            "• পেআউট < %g%% → রেজাল্টের জায়গায় পার্সেন্ট (যেমন 77%%), উইন/লসে গোনা হয় না\n\n"
+            "MTG: %s • পেআউট ন্যূনতম: %g%%\n%s") % (
+        S["pay"], S["pay"], MTG_LB[S["mtg"]], S["pay"],
+        "🟢 ফরওয়ার্ডের অপেক্ষায় আছি (একের পর এক অনেক মেসেজ ফরওয়ার্ড করা যাবে)" if on else "⚪ বন্ধ — /bugotcchecker চাপলে চালু হবে")
+
+
+def kb_main():
+    pay_row = [Btn(_tick(S["pay"] == v, "%d%%" % v), callback_data="bo:pay:%d" % v) for v in PAY_PRESETS]
+    custom = S["pay"] not in PAY_PRESETS
+    pay_row.append(Btn(_tick(custom, ("✏️ %g%%" % S["pay"]) if custom else "✏️"), callback_data="bo:pay:custom"))
+    return Markup([
+        [Btn(_tick(S["mtg"] == v, lb), callback_data="bo:mtg:%d" % v) for v, lb in MTG_LB.items()],
+        pay_row,
+        [Btn("🧹 দিনের হিসাব মুছো", callback_data="bo:clr:0"), Btn("⏹ বন্ধ", callback_data="bo:off:0")]])
+
+
+async def cmd_bugotc(update, ctx):
+    if not D["allowed"](update):
+        return await D["deny"](update)
+    S["armed"], S["armed_at"], S["wait"] = True, time.time(), False
+    await update.effective_message.reply_text(text_main(), reply_markup=kb_main())
+
+
+async def on_cb(update, ctx):
+    q = update.callback_query
+    if not D["allowed"](update):
+        return await q.answer("অনুমতি নেই", show_alert=True)
+    _p, key, val = q.data.split(":")
+    await q.answer()
+    if key == "mtg":
+        S["mtg"] = int(val)
+    elif key == "pay" and val == "custom":
+        S["wait"], S["wait_at"] = True, time.time()
+        await q.message.reply_text("✏️ কত পার্সেন্টের নিচে হলে রেজাল্ট দেখাবে না সেটা লেখো (যেমন: 80 অথবা 85)। ১ থেকে 100।")
+        return
+    elif key == "pay":
+        S["pay"], S["wait"] = float(val), False
+    elif key == "clr":
+        S["days"].clear()
+        S["last_date"] = None
+    elif key == "off":
+        S["armed"], S["wait"] = False, False
+    try:
+        await q.edit_message_text(text_main(), reply_markup=kb_main())
+    except BadRequest:
+        pass
+
+
+async def on_text(update, ctx):
+    """Group -8: reads a forwarded/pasted day list while armed (or the typed number of a ✏️ prompt). Everything else passes through."""
+    msg = update.effective_message
+    if not msg or not msg.text:
+        return
+    now = time.time()
+    p = parse(msg.text)
+    if S["wait"] and p["items"]:
+        S["wait"] = False
+    if S["wait"]:
+        if now - S["wait_at"] > WAIT_SECS:
+            S["wait"] = False
+        elif D["allowed"](update):
+            t = msg.text.translate(BN).replace("%", "").strip()
+            try:
+                v = float(t)
+            except ValueError:
+                v = -1
+            if not (1 <= v <= 100):
+                await msg.reply_text("বুঝিনি। ১ থেকে ১০০-এর মধ্যে একটা সংখ্যা লেখো (যেমন: 80)।")
+                raise ApplicationHandlerStop
+            S["pay"], S["wait"] = v, False
+            await msg.reply_text(text_main(), reply_markup=kb_main())
+            raise ApplicationHandlerStop
+    if not S["armed"] or now - S["armed_at"] > ARM_SECS or not D["allowed"](update):
+        return
+    if not p["items"]:
+        d = find_date(msg.text.translate(BN))
+        if d and len(msg.text) < 60:                    # just a date typed/forwarded: remember it for the next lists
+            S["last_date"] = d
+            await msg.reply_text("📅 তারিখ %s ধরা হলো। এবার লিস্ট ফরওয়ার্ড করো।" % d.strftime("%Y.%m.%d"))
+            raise ApplicationHandlerStop
+        return
+    S["armed_at"] = now
+    d = p["date"] or S["last_date"]
+    if d is None:
+        await msg.reply_text("📅 এই মেসেজে তারিখ পাইনি। আগে তারিখসহ মেসেজ ফরওয়ার্ড করো, অথবা শুধু তারিখ লেখো (যেমন 2026-11-13), তারপর লিস্ট দাও।")
+        raise ApplicationHandlerStop
+    S["last_date"] = d
+    chat_id = update.effective_chat.id
+    prog = await D["send"](chat_id, "⏳ %d টা সিগন্যালের পেআউট ও ক্যান্ডেল দেখছি…" % len(p["items"]))
+    try:
+        data, err = await asyncio.to_thread(load_all, {(it["pair"], d) for it in p["items"]})
+        rows = [(it,) + evaluate(it, data.get((it["pair"], d)), S["mtg"], S["pay"]) for it in p["items"]]
+        day = S["days"].setdefault(d, {})
+        for it, k, v in rows:
+            day[it["key"]] = (k, v)
+        width = max(len(pairs.pretty(it["pair"])) for it in p["items"])
+        day_all = [kv for kv in day.values()] if len(day) > len(rows) else None
+        texts = build_messages(d, rows, width, MTG_LB[S["mtg"]], day_all)
+        for t in texts:
+            await D["send"](chat_id, t, parse_mode="HTML")
+        notes = []
+        if p["skipped_pair"]:
+            notes.append("%d টা লাইনের পেয়ার চিনিনি" % p["skipped_pair"])
+        if p["skipped_side"]:
+            notes.append("%d টা লাইনে BUY/PUT নেই" % p["skipped_side"])
+        if err:
+            notes.append("ডাটাবেজ সমস্যা: %s" % err)
+        if notes:
+            await D["send"](chat_id, "ℹ️ " + " • ".join(notes))
+    except Exception as e:  # noqa
+        log.exception("bugotc failed")
+        await D["send"](chat_id, "❌ বাগ OTC চেকার হয়নি: %s" % e)
+    finally:
+        if prog:
+            try:
+                await prog.delete()
+            except Exception:  # noqa
+                pass
+    raise ApplicationHandlerStop
+
+
+async def _clear_wait(update, ctx):
+    """Another engine's command / button was used: forget a pending ✏️ prompt and stop reading forwarded lists (does not stop the other handler)."""
+    S["wait"], S["armed"] = False, False
+
+
+def register(app, send, allowed, deny, lock, bot_getter):
+    """Called once from bot.py main(): own command (/bugotcchecker), callbacks (bo:) and text handler — nothing existing is changed."""
+    D.update(send=send, allowed=allowed, deny=deny, lock=lock, bot=bot_getter)
+    app.add_handler(CommandHandler("bugotcchecker", cmd_bugotc))
+    app.add_handler(CallbackQueryHandler(on_cb, pattern=r"^bo:"))
+    app.add_handler(CommandHandler(["engine3", "engine4", "engine6", "engine8", "engine9", "engine10", "engine11", "engine12", "engine13", "engine14",
+                                    "otctest", "realtest"], _clear_wait), group=-9)
+    app.add_handler(CallbackQueryHandler(_clear_wait, pattern=r"^(e3|e4|e6|e8|e9|e10|e11|e12|e13|e14|ot|rt):"), group=-9)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text), group=-8)
+
+
+COMMAND = BotCommand("bugotcchecker", "বাগ OTC চেকার: লিস্ট ফরওয়ার্ড করলে পেআউট % ও রেজাল্ট দেখায়")
