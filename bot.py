@@ -48,6 +48,7 @@ engine12 = _opt("engine12")      # /engine12 (own file: engine11 back-test + otc
 engine13 = _opt("engine13")      # /engine13 (own file: engine12 + EMA trend filter, walk-forward)
 engine14 = _opt("engine14")      # /engine14 (own file: fast independent copy of engine12)
 bugotc = _opt("bugotc")          # /bugotcchecker (own file: forwarded day list -> payout % + result, Quantex style)
+mtgshift = _opt("mtgshift")      # /mtgshift (own file: forwarded day list, first candle skipped -> result from the next candle)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("bugbot")
@@ -137,16 +138,16 @@ LEGEND = ("✅ = টেস্ট পিরিয়ডেও টিকেছে 
 
 
 def _head_cmds_all():
-    return ("/check USDJPY 30 UP 12-24 — একটা নির্দিষ্ট স্লটের হিসাব\n/engine3 — ইঞ্জিন ৩ (মিনিট গ্রিড: G/R টেবিল + উইন রেশিও, PDF/CSV)\n/engine4 — ইঞ্জিন ৪ (ব্যাক-টু-ব্যাক লসের পর সিগন্যাল গোনা)\n/engine6 — ইঞ্জিন ৬ (ইঞ্জিন ৩-এর মতো, কিন্তু গ্রিন/রেড আলাদা চার্ট, একদিনের কম B2B লস আগে)\n/engine8 — ইঞ্জিন ৮ (ইঞ্জিন ৬-এর হিসাব, শুধু টেক্সট: গ্রিন/রেডের সর্বনিম্ন B2B লসের মিনিটগুলো)\n/engine9 — ইঞ্জিন ৯ (ইঞ্জিন ৮-এর মিনিটগুলো সরাসরি ইঞ্জিন ৪-এর সিগন্যাল গণনায়, শুধু টেক্সট)\n/engine10 — ইঞ্জিন ১০ সিগন্যাল রাডার (১০০% উইনের স্লট থেকে লাইভ UP/DOWN অ্যালার্ট + রেজাল্ট)\n/engine11 — ইঞ্জিন ১১ (ইঞ্জিন ১০-এর মতো, সাথে ব্যাক-টেস্ট কোন তারিখ পর্যন্ত হবে সেটা বাছাই: ডাটাবেজের শেষ দিন অথবা কাস্টম তারিখ)\n/engine12 — ইঞ্জিন ১২ (ইঞ্জিন ১১-এর তালিকা + OTC টেস্ট রিপ্লে একসাথে, কপি-পেস্ট ছাড়া)\n/engine13 — ইঞ্জিন ১৩ (ইঞ্জিন ১২ + EMA ফিল্টার: কোন EMA সেটিং সবচেয়ে ভালো ছাঁকে)\n/engine14 — ইঞ্জিন ১৪ (ইঞ্জিন ১২-এর দ্রুত স্বাধীন কপি: একই ফলাফল, কম সময়ে)\n/bugotcchecker — বাগ OTC চেকার (ইঞ্জিনের দিনের লিস্ট ফরওয়ার্ড করলে প্রতিটা সিগন্যালের পেআউট % ও রেজাল্ট, কম পেআউটে শুধু পার্সেন্ট)\n/live — লাইভ অ্যালার্ট চালু/বন্ধ\n/status — অবস্থা\n/data — ডেটা কভারেজ\n/db — ডাটাবেজ সাইজ + কত দিনের ডেটা জমা (রিয়েল ও OTC)\n/otctest — OTC তালিকা পেস্ট করে কোনো দিনের রিপ্লে টেস্ট\n/realtest — রিয়েল তালিকা পেস্ট করে কোনো দিনের রিপ্লে টেস্ট\n/id — আমার Telegram ID")
+    return ("/check USDJPY 30 UP 12-24 — একটা নির্দিষ্ট স্লটের হিসাব\n/engine3 — ইঞ্জিন ৩ (মিনিট গ্রিড: G/R টেবিল + উইন রেশিও, PDF/CSV)\n/engine4 — ইঞ্জিন ৪ (ব্যাক-টু-ব্যাক লসের পর সিগন্যাল গোনা)\n/engine6 — ইঞ্জিন ৬ (ইঞ্জিন ৩-এর মতো, কিন্তু গ্রিন/রেড আলাদা চার্ট, একদিনের কম B2B লস আগে)\n/engine8 — ইঞ্জিন ৮ (ইঞ্জিন ৬-এর হিসাব, শুধু টেক্সট: গ্রিন/রেডের সর্বনিম্ন B2B লসের মিনিটগুলো)\n/engine9 — ইঞ্জিন ৯ (ইঞ্জিন ৮-এর মিনিটগুলো সরাসরি ইঞ্জিন ৪-এর সিগন্যাল গণনায়, শুধু টেক্সট)\n/engine10 — ইঞ্জিন ১০ সিগন্যাল রাডার (১০০% উইনের স্লট থেকে লাইভ UP/DOWN অ্যালার্ট + রেজাল্ট)\n/engine11 — ইঞ্জিন ১১ (ইঞ্জিন ১০-এর মতো, সাথে ব্যাক-টেস্ট কোন তারিখ পর্যন্ত হবে সেটা বাছাই: ডাটাবেজের শেষ দিন অথবা কাস্টম তারিখ)\n/engine12 — ইঞ্জিন ১২ (ইঞ্জিন ১১-এর তালিকা + OTC টেস্ট রিপ্লে একসাথে, কপি-পেস্ট ছাড়া)\n/engine13 — ইঞ্জিন ১৩ (ইঞ্জিন ১২ + EMA ফিল্টার: কোন EMA সেটিং সবচেয়ে ভালো ছাঁকে)\n/engine14 — ইঞ্জিন ১৪ (ইঞ্জিন ১২-এর দ্রুত স্বাধীন কপি: একই ফলাফল, কম সময়ে)\n/bugotcchecker — বাগ OTC চেকার (ইঞ্জিনের দিনের লিস্ট ফরওয়ার্ড করলে প্রতিটা সিগন্যালের পেআউট % ও রেজাল্ট, কম পেআউটে শুধু পার্সেন্ট)\n/mtgshift — MTG শিফট (লিস্ট ফরওয়ার্ড করলে প্রথম ক্যান্ডেল বাদ, পরের ক্যান্ডেল থেকে ঢুকলে নন-MTG/MTG1 রেজাল্ট)\n/live — লাইভ অ্যালার্ট চালু/বন্ধ\n/status — অবস্থা\n/data — ডেটা কভারেজ\n/db — ডাটাবেজ সাইজ + কত দিনের ডেটা জমা (রিয়েল ও OTC)\n/otctest — OTC তালিকা পেস্ট করে কোনো দিনের রিপ্লে টেস্ট\n/realtest — রিয়েল তালিকা পেস্ট করে কোনো দিনের রিপ্লে টেস্ট\n/id — আমার Telegram ID")
 
 
 def head_cmds():
     """Command list for /start, without the lines of engines whose file is not there."""
     mods = {"engine3": engine3, "engine4": engine4, "engine6": engine6, "engine8": engine8, "engine9": engine9,
-            "engine10": radar, "engine11": radar11, "engine12": engine12, "engine13": engine13, "engine14": engine14, "bugotcchecker": bugotc, "otctest": otctest, "realtest": otctest}
+            "engine10": radar, "engine11": radar11, "engine12": engine12, "engine13": engine13, "engine14": engine14, "bugotcchecker": bugotc, "mtgshift": mtgshift, "otctest": otctest, "realtest": otctest}
     keep = []
     for line in _head_cmds_all().split("\n"):
-        m = re.match(r"/(engine\d+|otctest|realtest|bugotcchecker)\b", line)
+        m = re.match(r"/(engine\d+|otctest|realtest|bugotcchecker|mtgshift)\b", line)
         if m and mods.get(m.group(1)) is None:
             continue
         keep.append(line)
@@ -2496,6 +2497,8 @@ async def post_init(app):
         cmds.append(engine14.COMMAND)
     if bugotc is not None:
         cmds.append(bugotc.COMMAND)
+    if mtgshift is not None:
+        cmds.append(mtgshift.COMMAND)
     try:
         await app.bot.set_my_commands(cmds)
     except Exception:  # noqa
@@ -2608,6 +2611,8 @@ def main():
         engine14.register(app, send, allowed, deny, SCAN_LOCK, lambda: APP.bot)      # /engine14 (own command, own handlers)
     if bugotc is not None:
         bugotc.register(app, send, allowed, deny, SCAN_LOCK, lambda: APP.bot)        # /bugotcchecker (own command, own handlers)
+    if mtgshift is not None:
+        mtgshift.register(app, send, allowed, deny, SCAN_LOCK, lambda: APP.bot)      # /mtgshift (own command, own handlers)
     app.run_polling(drop_pending_updates=True)
 
 

@@ -617,8 +617,8 @@ def register(app, send, allowed, deny, lock, bot_getter):
     app.add_handler(CommandHandler("bugotcchecker", cmd_bugotc))
     app.add_handler(CallbackQueryHandler(on_cb, pattern=r"^bo:"))
     app.add_handler(CommandHandler(["engine3", "engine4", "engine6", "engine8", "engine9", "engine10", "engine11", "engine12", "engine13", "engine14",
-                                    "otctest", "realtest"], _clear_wait), group=-9)
-    app.add_handler(CallbackQueryHandler(_clear_wait, pattern=r"^(e3|e4|e6|e8|e9|e10|e11|e12|e13|e14|ot|rt):"), group=-9)
+                                    "otctest", "realtest", "mtgshift"], _clear_wait), group=-9)
+    app.add_handler(CallbackQueryHandler(_clear_wait, pattern=r"^(e3|e4|e6|e8|e9|e10|e11|e12|e13|e14|ot|rt|ms):"), group=-9)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text), group=-8)
 
 
