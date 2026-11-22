@@ -370,25 +370,25 @@ def _tick(on, label):
 
 
 def text_main():
+    """HTML message (parse_mode HTML): bold headings/values, coloured emoji bars, quote blocks."""
     on = S["armed"] and time.time() - S["armed_at"] < ARM_SECS
-    return ("🧾 বাগ OTC চেকার\n"
-            "━━━━━━━━━━━━━━━━━━\n"
-            "📥 কীভাবে ব্যবহার করবে\n"
-            "১. /engine14-এর দিনের মেসেজ (📅 তারিখসহ) এখানে ফরওয়ার্ড করো। একসাথে অনেক মেসেজ বা অনেক দিন দেওয়া যায়; তারিখ না থাকলে আগের মেসেজের তারিখ ধরা হয়।\n"
-            "২. পাঠানো শেষ হলে বট জিজ্ঞেস করবে। ✅ চাপলে সব একবারে হিসাব হবে।\n\n"
-            "📊 বট কী করে\n"
-            "প্রতিটা সিগন্যালের ওই মিনিটের পেআউট ডাটাবেজ থেকে দেখে:\n"
-            "✅ পেআউট %g%% বা তার বেশি → রেজাল্ট দেখায়:\n"
-            "     ✅ সরাসরি উইন • ✅¹ ✅² ✅³ MTG ধাপে উইন • ❌ লস\n"
-            "📉 পেআউট %g%%-এর কম → রেজাল্টের জায়গায় পার্সেন্ট দেখায় (যেমন 77%%); উইন/লসে গোনা হয় না\n\n"
-            "⚙️ বর্তমান সেটিং\n"
-            "━━━━━━━━━━━━━━━━━━\n"
-            "🔁 MTG: %s\n"
-            "💰 পেআউট ন্যূনতম: %g%%\n"
-            "📋 লিস্ট: %s\n\n"
-            "%s") % (
-        S["pay"], S["pay"], MTG_LB[S["mtg"]], S["pay"], VIEW_LB[S["view"]],
-        "🟢 ফরওয়ার্ডের অপেক্ষায় আছি" if on else "⚪ বন্ধ — /bugotcchecker চাপলে চালু হবে")
+    return ("🧾 <b>বাগ OTC চেকার</b>\n"
+            "🟩🟩🟩🟩🟩🟩🟩🟩🟩\n"
+            "📥 <b>কীভাবে ব্যবহার করবে</b>\n"
+            "<blockquote>১. /engine14-এর দিনের মেসেজ (📅 তারিখসহ) এখানে ফরওয়ার্ড করো — একসাথে অনেক মেসেজ বা অনেক দিন দেওয়া যায়; তারিখ না থাকলে আগের মেসেজের তারিখ ধরা হয়।\n২. পাঠানো শেষ হলে বট জিজ্ঞেস করবে — <b>✅ চাপলে</b> সব একবারে হিসাব হবে।</blockquote>\n"
+            "🟦🟦🟦🟦🟦🟦🟦🟦🟦\n"
+            "📊 <b>বট কী করে</b> — প্রতিটা সিগন্যালের ওই মিনিটের পেআউট ডাটাবেজ থেকে দেখে\n"
+            "<blockquote>✅ পেআউট <b>%g%% বা বেশি</b> → রেজাল্ট দেখায়:\n"
+            "✅ সরাসরি • ✅¹ ✅² ✅³ MTG ধাপে উইন • ❌ লস\n\n"
+            "📉 পেআউট <b>%g%%-এর কম</b> → রেজাল্টের জায়গায় পার্সেন্ট (যেমন 77%%), উইন/লসে গোনা হয় না</blockquote>\n"
+            "🟧🟧🟧🟧🟧🟧🟧🟧🟧\n"
+            "⚙️ <b>বর্তমান সেটিং</b>\n"
+            "🔁 MTG: <b>%s</b>\n"
+            "💰 পেআউট ন্যূনতম: <b>%g%%</b>\n"
+            "📋 লিস্ট: <b>%s</b>\n"
+            "🟩🟩🟩🟩🟩🟩🟩🟩🟩\n"
+            "%s") % (S["pay"], S["pay"], MTG_LB[S["mtg"]], S["pay"], VIEW_LB[S["view"]].split(" ", 1)[1],
+        "🟢 <b>ফরওয়ার্ডের অপেক্ষায় আছি</b>" if on else "⚪ <b>বন্ধ</b> — /bugotcchecker চাপলে চালু হবে")
 
 
 def kb_main():
@@ -406,7 +406,7 @@ async def cmd_bugotc(update, ctx):
     if not D["allowed"](update):
         return await D["deny"](update)
     S["armed"], S["armed_at"], S["wait"] = True, time.time(), False
-    await update.effective_message.reply_text(text_main(), reply_markup=kb_main())
+    await update.effective_message.reply_text(text_main(), reply_markup=kb_main(), parse_mode="HTML")
 
 
 async def on_cb(update, ctx):
@@ -460,7 +460,7 @@ async def on_cb(update, ctx):
         S["gen"] += 1
         await _drop_prompt()
     try:
-        await q.edit_message_text(text_main(), reply_markup=kb_main())
+        await q.edit_message_text(text_main(), reply_markup=kb_main(), parse_mode="HTML")
     except BadRequest:
         pass
 
@@ -487,7 +487,7 @@ async def on_text(update, ctx):
                 await msg.reply_text("বুঝিনি। ১ থেকে ১০০-এর মধ্যে একটা সংখ্যা লেখো (যেমন: 80)।")
                 raise ApplicationHandlerStop
             S["pay"], S["wait"] = v, False
-            await msg.reply_text(text_main(), reply_markup=kb_main())
+            await msg.reply_text(text_main(), reply_markup=kb_main(), parse_mode="HTML")
             raise ApplicationHandlerStop
     if not S["armed"] or now - S["armed_at"] > ARM_SECS or not D["allowed"](update):
         return

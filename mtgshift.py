@@ -380,27 +380,28 @@ def _tick(on, label):
 
 
 def text_main():
+    """HTML message (parse_mode HTML): bold headings/values, coloured emoji bars, quote blocks."""
     on = S["armed"] and time.time() - S["armed_at"] < ARM_SECS
-    return ("🔀 MTG শিফট টেস্ট\n"
-            "━━━━━━━━━━━━━━━━━━\n"
-            "📥 কীভাবে ব্যবহার করবে\n"
-            "১. /engine14-এর দিনের মেসেজ (📅 তারিখসহ) এখানে ফরওয়ার্ড করো। একসাথে অনেক মেসেজ বা অনেক দিন দেওয়া যায়।\n"
-            "২. পাঠানো শেষ হলে বট জিজ্ঞেস করবে। ✅ চাপলে সব একবারে হিসাব হবে।\n\n"
-            "📖 নিয়ম: লিস্টের সময়ের প্রথম ক্যান্ডেলে ট্রেড ধরা হয় না\n"
-            "⏭ প্রথম ক্যান্ডেলেই উইন → সারিটা বাদ, হিসাবে আসে না\n"
+    return ("🔀 <b>MTG শিফট টেস্ট</b>\n"
+            "🟩🟩🟩🟩🟩🟩🟩🟩🟩\n"
+            "📥 <b>কীভাবে ব্যবহার করবে</b>\n"
+            "<blockquote>১. /engine14-এর দিনের মেসেজ (📅 তারিখসহ) এখানে ফরওয়ার্ড করো — একসাথে অনেক মেসেজ বা অনেক দিন দেওয়া যায়।\n২. পাঠানো শেষ হলে বট জিজ্ঞেস করবে — <b>✅ চাপলে</b> সব একবারে হিসাব হবে।</blockquote>\n"
+            "🟦🟦🟦🟦🟦🟦🟦🟦🟦\n"
+            "📖 <b>নিয়ম</b> — লিস্টের সময়ের <b>প্রথম ক্যান্ডেলে ট্রেড ধরা হয় না</b>\n"
+            "<blockquote>⏭ প্রথম ক্যান্ডেলেই উইন → সারিটা <b>বাদ</b>, হিসাবে আসে না\n"
             "▶️ নইলে পরের ক্যান্ডেলে ঢোকা হয়:\n"
-            "     ✅ ওই ক্যান্ডেল উইন → নন-MTG\n"
-            "     ✅¹ তার পরের ক্যান্ডেল উইন → MTG1\n"
-            "     ❌ সব লস → লস\n"
-            "💰 পেআউট দেখা হয় নতুন এন্ট্রি মিনিটে; ন্যূনতমের কম হলে রেজাল্টের জায়গায় পার্সেন্ট দেখায়\n\n"
-            "⚙️ বর্তমান সেটিং\n"
-            "━━━━━━━━━━━━━━━━━━\n"
-            "🔁 MTG: %s\n"
-            "💰 পেআউট ন্যূনতম: %g%%\n"
-            "📋 লিস্ট: %s\n\n"
-            "%s") % (
-        MTG_LB[S["mtg"]], S["pay"], VIEW_LB[S["view"]],
-        "🟢 ফরওয়ার্ডের অপেক্ষায় আছি" if on else "⚪ বন্ধ — /mtgshift চাপলে চালু হবে")
+            "✅ ওই ক্যান্ডেল উইন → <b>নন-MTG</b>\n"
+            "✅¹ তার পরের ক্যান্ডেল উইন → <b>MTG1</b>\n"
+            "❌ সব লস → <b>লস</b>\n"
+            "💰 পেআউট দেখা হয় <b>নতুন এন্ট্রি মিনিটে</b>; ন্যূনতমের কম হলে রেজাল্টের জায়গায় পার্সেন্ট দেখায়</blockquote>\n"
+            "🟧🟧🟧🟧🟧🟧🟧🟧🟧\n"
+            "⚙️ <b>বর্তমান সেটিং</b>\n"
+            "🔁 MTG: <b>%s</b>\n"
+            "💰 পেআউট ন্যূনতম: <b>%g%%</b>\n"
+            "📋 লিস্ট: <b>%s</b>\n"
+            "🟩🟩🟩🟩🟩🟩🟩🟩🟩\n"
+            "%s") % (MTG_LB[S["mtg"]], S["pay"], VIEW_LB[S["view"]].split(" ", 1)[1],
+        "🟢 <b>ফরওয়ার্ডের অপেক্ষায় আছি</b>" if on else "⚪ <b>বন্ধ</b> — /mtgshift চাপলে চালু হবে")
 
 
 def kb_main():
@@ -418,7 +419,7 @@ async def cmd_mtgshift(update, ctx):
     if not D["allowed"](update):
         return await D["deny"](update)
     S["armed"], S["armed_at"], S["wait"] = True, time.time(), False
-    await update.effective_message.reply_text(text_main(), reply_markup=kb_main())
+    await update.effective_message.reply_text(text_main(), reply_markup=kb_main(), parse_mode="HTML")
 
 
 async def on_cb(update, ctx):
@@ -472,7 +473,7 @@ async def on_cb(update, ctx):
         S["gen"] += 1
         await _drop_prompt()
     try:
-        await q.edit_message_text(text_main(), reply_markup=kb_main())
+        await q.edit_message_text(text_main(), reply_markup=kb_main(), parse_mode="HTML")
     except BadRequest:
         pass
 
@@ -499,7 +500,7 @@ async def on_text(update, ctx):
                 await msg.reply_text("বুঝিনি। ১ থেকে ১০০-এর মধ্যে একটা সংখ্যা লেখো (যেমন: 80)।")
                 raise ApplicationHandlerStop
             S["pay"], S["wait"] = v, False
-            await msg.reply_text(text_main(), reply_markup=kb_main())
+            await msg.reply_text(text_main(), reply_markup=kb_main(), parse_mode="HTML")
             raise ApplicationHandlerStop
     if not S["armed"] or now - S["armed_at"] > ARM_SECS or not D["allowed"](update):
         return

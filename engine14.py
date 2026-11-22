@@ -1697,40 +1697,46 @@ def make_csv(sigs):
 
 # ---------------------------------------------------------------- 4) settings screen
 def e14_text():
-    ps = ", ".join(pairs.pretty(p) for p in E["pairs"]) or "— (বাছাই করোনি)"
-    mtg = " + ".join(MTG_LB[v] for v in sorted(E["mtg"])) or "— (বাছাই করোনি)"
+    """HTML message (parse_mode HTML): bold headings/values, coloured emoji bars, quote block for the explanation."""
+    h = lambda x: html.escape(str(x), quote=False)
+    ps = ", ".join(pairs.pretty(p) for p in E["pairs"]) or "বাছাই করোনি"
+    mtg = " + ".join(MTG_LB[v] for v in sorted(E["mtg"])) or "বাছাই করোনি"
     files = " + ".join(x for x, f in (("তালিকার মেসেজ", E["show_list"]), ("CSV", E["csv"])) if f) or "শুধু রিপোর্ট"
     nd = len(test_dates())
-    mkt = ("🧪 OTC — পুরো ২৪ ঘণ্টা (০০:০০ – ২৩:৫৯)" if E["mkt"] == "otc" else "🌍 রিয়েল — দুপুর ১২:০০ থেকে ২৩:৫৯ (BDT)")
+    otc = E["mkt"] == "otc"
     lines = [
-        "🧪 ইঞ্জিন ১৪ — অটো ব্যাক-টেস্ট ও রিপ্লে টেস্ট",
-        "━━━━━━━━━━━━━━━━━━",
-        "📖 এটা কী করে",
-        "ইঞ্জিন ১১-এর ১০০% উইনের তালিকা বানানো আর /otctest-এর রিপ্লে — দুটো একসাথে, কপি-পেস্ট ছাড়া।",
-        "",
-        "প্রতিটা টেস্ট-দিনের জন্য বট:",
-        "  ১️⃣ ওই দিনের আগের দিন পর্যন্ত ডেটা দিয়ে তালিকা বানায়",
-        "  ২️⃣ ওই দিনের ক্যান্ডেলে রিপ্লে চালায়",
-        "টেস্টের দিনের ডেটা তালিকায় ঢোকে না, তাই আগাম ফলাফল দেখে ফেলার ফাঁকি থাকে না।",
-        "",
-        "⚙️ বর্তমান সেটিং",
-        "━━━━━━━━━━━━━━━━━━",
-        "📅 টেস্টের দিন: %s%s" % (dates_label(), (" (%d দিন)" % nd) if nd > 1 else ""),
-        "⏱ টাইম ফ্রেম: %d মিনিট" % E["tf"],
-        "🗓 ব্যাক-টেস্ট সময়কাল: %s (প্রতি টেস্ট-দিনের আগের দিন পর্যন্ত)" % months_label(E["months"]),
-        "🔁 MTG: %s" % mtg,
-        "📉 ব্যাক-টু-ব্যাক লস: %d টা (%s)" % (E["n"], MODE_LB[E["mode"]]),
-        "🔢 ন্যূনতম সিগন্যাল: %d" % E["minsig"],
-        "💬 মেসেজ: %s" % ("সব সিগন্যাল + রেজাল্ট (লাইভের মতো)" if E["all_msgs"] else "শুধু সারাংশ"),
-        "📎 সাথে পাঠাবে: %s" % files,
-        "💱 পেয়ার: %s" % ps,
-        "",
-        "মার্কেট: " + mkt,
-        "",
-        "ℹ️ একাধিক দিনের জন্য ✏️ তারিখ চেপে 14-18 অথবা 14,15,16,17,18 লেখো (একসাথে সর্বোচ্চ %d দিন)।" % MAX_DAYS]
+        "🧪 <b>ইঞ্জিন ১৪ — অটো ব্যাক-টেস্ট ও রিপ্লে টেস্ট</b>",
+        "%s",
+        "📖 <b>এটা কী করে</b>",
+        "<blockquote>ইঞ্জিন ১১-এর <b>১০০% উইনের তালিকা</b> বানানো আর /otctest-এর <b>রিপ্লে</b> — দুটো একসাথে, কপি-পেস্ট ছাড়া।\n\n"
+        "প্রতিটা টেস্ট-দিনের জন্য বট:\n"
+        "১️⃣ আগের দিন পর্যন্ত ডেটা দিয়ে তালিকা বানায়\n"
+        "২️⃣ ওই দিনের ক্যান্ডেলে রিপ্লে চালায়\n\n"
+        "🔒 টেস্টের দিনের ডেটা তালিকায় ঢোকে না, তাই আগাম ফলাফল দেখে ফেলার ফাঁকি থাকে না।</blockquote>",
+        "%s",
+        "⚙️ <b>টেস্ট সেটিং</b>",
+        "📅 টেস্টের দিন: <b>%s%s</b>" % (h(dates_label()), (" (%d দিন)" % nd) if nd > 1 else ""),
+        "⏱ টাইম ফ্রেম: <b>%d মিনিট</b>" % E["tf"],
+        "🗓 ব্যাক-টেস্ট সময়কাল: <b>%s</b> (প্রতি টেস্ট-দিনের আগের দিন পর্যন্ত)" % h(months_label(E["months"])),
+        "🔁 MTG: <b>%s</b>" % h(mtg),
+        "📉 ব্যাক-টু-ব্যাক লস: <b>%d টা</b> (%s)" % (E["n"], h(MODE_LB[E["mode"]])),
+        "🔢 ন্যূনতম সিগন্যাল: <b>%d</b>" % E["minsig"],
+        "💬 মেসেজ: <b>%s</b>" % ("সব সিগন্যাল + রেজাল্ট (লাইভের মতো)" if E["all_msgs"] else "শুধু সারাংশ"),
+        "📎 সাথে পাঠাবে: <b>%s</b>" % h(files),
+        "💱 পেয়ার: <b>%s</b>" % h(ps),
+        "%s",
+        "🌍 <b>মার্কেট সেটিং</b>",
+        ("🧪 মার্কেট: <b>OTC</b>\n🕛 সময়: <b>পুরো ২৪ ঘণ্টা (০০:০০ – ২৩:৫৯)</b>" if otc else
+         "🟢 মার্কেট: <b>রিয়েল</b>\n🕛 সময়: <b>দুপুর ১২:০০ – ২৩:৫৯ (BDT)</b>"),
+        "%s",
+        "ℹ️ <i>একাধিক দিনের জন্য ✏️ তারিখ চেপে 14-18 অথবা 14,15,16,17,18 লেখো (একসাথে সর্বোচ্চ %d দিন)।</i>" % MAX_DAYS]
+    bars = iter(["🟩" * 9, "🟦" * 9, "🟧" * 9, "🟩" * 9])
+    out = []
+    for ln in lines:
+        out.append(next(bars) if ln == "%s" else ln)
     if E["running"]:
-        lines += ["", "⏳ একটা টেস্ট চলছে।"]
-    return "\n".join(lines)
+        out += ["", "⏳ <b>একটা টেস্ট চলছে।</b>"]
+    return "\n".join(out)
 
 
 def e14_kb():
@@ -1855,7 +1861,7 @@ async def cmd_engine14(update, ctx):
         E["pairs"] = list(dict.fromkeys(only))
         E["mkt"] = "otc" if pairs.is_otc(only[0]) else "real"
     E["page"], E["wait"] = "main", False
-    await update.effective_message.reply_text(e14_text(), reply_markup=e14_kb())
+    await update.effective_message.reply_text(e14_text(), reply_markup=e14_kb(), parse_mode="HTML")
 
 
 def _ask(key):
@@ -1915,7 +1921,7 @@ async def on_cb(update, ctx):
         E["days"], E["wait"], E["wait_at"] = "custom", "dates", time.time()
         await q.message.reply_text(_ask("dates"))
         try:
-            await q.edit_message_text(e14_text(), reply_markup=e14_kb())
+            await q.edit_message_text(e14_text(), reply_markup=e14_kb(), parse_mode="HTML")
         except BadRequest:
             pass
         return
@@ -1951,7 +1957,7 @@ async def on_cb(update, ctx):
     elif key == "pclr":
         E["pairs"] = []
     try:
-        await q.edit_message_text(e14_text(), reply_markup=e14_kb())
+        await q.edit_message_text(e14_text(), reply_markup=e14_kb(), parse_mode="HTML")
     except BadRequest:
         pass
 
@@ -2004,7 +2010,7 @@ async def on_text(update, ctx):
             raise ApplicationHandlerStop
         E["months"] = months
     E["wait"], E["page"] = False, "main"
-    await msg.reply_text(e14_text(), reply_markup=e14_kb())
+    await msg.reply_text(e14_text(), reply_markup=e14_kb(), parse_mode="HTML")
     raise ApplicationHandlerStop
 
 
