@@ -801,7 +801,7 @@ UP, DOWN = "UP (Call) 📈", "DOWN (Put) 📉"
 MAX_DAYS = 7                                                          # most days in one test
 
 def _new():
-    return dict(step=None, text="", rules=None, hdr=None, mode="all", stop=False, running=False)     # step: None | "paste" | "date"
+    return dict(step=None, text="", rules=None, hdr=None, mode="all", stop=False, running=False, dl=None)     # step: None | "paste" | "date"
 
 
 S = {"otc": _new(), "real": _new()}     # everything is kept apart per market: /otctest -> S["otc"], /realtest -> S["real"]
@@ -813,7 +813,7 @@ PFX = {"otc": "ot", "real": "rt"}
 
 
 def _reset(m):
-    S[m].update(step=None, text="", rules=None, hdr=None, stop=False)
+    S[m].update(step=None, text="", rules=None, hdr=None, stop=False, dl=None)
 
 
 def _digits(s):
@@ -868,6 +868,66 @@ def parse(text):
     if not rules:
         return None, [], "কোনো স্লট পাইনি। /engine10-এর তালিকার টেক্সট (💱 পেয়ার, 🟢 / 🔴 মিনিট) পাঠাও।"
     return dict(tf=tf, n=n, atleast=atleast, mtgs=mtgs), rules, None
+
+
+# ---------------------------------------------------------------- 1b) read a DAY LIST (result of /engine12, /engine14 or /otctest itself)
+# Second accepted format (the /engine10 text above still works exactly as before):
+#   📅 - 2026.11.21
+#   M1 AUDNZD-OTC 02:05 PUT ❌        (✅ = direct win, ✅¹ = MTG1 win, ✅² = MTG2 win, ❌ = loss)
+# Every distinct (pair, side, minute) of the rows becomes a radar slot (BUY = green, PUT = red). The list has no header, so MTG and the number
+# of back-to-back losses are chosen with buttons after the list is read (the MTG default is the highest level seen in the rows).
+_DL_ROW = re.compile(r"^\s*M(\d{1,2})\s+(\S+)\s+(\d{1,2}):(\d{2})(?!\d)\s*(BUY|PUT|UP|DOWN|CALL)?(.*)$", re.I)
+_DL_DATE = re.compile(r"(?<!\d)(\d{4})\s*[-./]\s*(\d{1,2})\s*[-./]\s*(\d{1,2})(?!\d)")
+_SUPLVL = {"\u00b9": 1, "\u00b2": 2, "\u00b3": 3}
+
+
+def parse_daylist(text):
+    """-> (dict(tf, rules=[(pair, side, minute)], lvl, dates, skipped) or None, error text)."""
+    text = _digits(text).replace("\ufe0f", "")
+    rows, dates, lvl = [], [], 0
+    for ln in text.splitlines():
+        d = _DL_DATE.search(ln)
+        if d and not _DL_ROW.match(ln):
+            try:
+                dd = dt.date(int(d.group(1)), int(d.group(2)), int(d.group(3)))
+                if dd not in dates:
+                    dates.append(dd)
+            except ValueError:
+                pass
+            continue
+        m = _DL_ROW.match(ln)
+        if not m:
+            continue
+        side = (m.group(5) or "").upper()
+        side = {"BUY": "G", "UP": "G", "CALL": "G", "PUT": "R", "DOWN": "R"}.get(side)
+        pair = pairs.norm(m.group(2))
+        if not side or not pair:
+            continue
+        tf, mi = int(m.group(1)), int(m.group(4))
+        rows.append((tf, pair, side, mi))
+        w = re.search(r"\u2705\s*([\u00b9\u00b2\u00b3])", m.group(6) or "")
+        if w:
+            lvl = max(lvl, _SUPLVL[w.group(1)])
+    if not rows:
+        return None, "সিগন্যাল লিস্টের লাইন পাইনি (যেমন: M1 AUDNZD-OTC 02:05 PUT ✅)।"
+    tfs = {}
+    for r in rows:
+        tfs[r[0]] = tfs.get(r[0], 0) + 1
+    tf = max(tfs, key=lambda k: tfs[k])
+    if tf <= 0 or 60 % tf:
+        return None, "টাইম ফ্রেম বুঝিনি: M%d" % tf
+    rules, seen, skipped = [], set(), 0
+    for t_, pair, side, mi in rows:
+        if t_ != tf or mi % tf:
+            skipped += 1
+            continue
+        k = (pair, side, mi)
+        if k not in seen:
+            seen.add(k)
+            rules.append(k)
+    if not rules:
+        return None, "কোনো স্লট পাইনি।"
+    return dict(tf=tf, rules=rules, lvl=lvl, dates=sorted(dates), skipped=skipped), None
 
 
 def summary_line(hdr, rules):
@@ -1140,6 +1200,34 @@ def _kb_date(m):
                    [Btn("❌ বাতিল", callback_data="%s:cancel:0" % p)]])
 
 
+DL_MTG = {0: "নন-MTG", 1: "MTG1", 2: "MTG2", 3: "MTG3"}
+
+
+def _dt(on, label):
+    return ("✅ " if on else "") + label
+
+
+def _kb_dl(m):
+    p, d = PFX[m], S[m]["dl"]
+    return Markup([[Btn(_dt(d["mtg"] == v, lb), callback_data="%s:dm:%d" % (p, v)) for v, lb in DL_MTG.items()],
+                   [Btn(_dt(d["n"] == v, "লস %d" % v), callback_data="%s:dn:%d" % (p, v)) for v in range(1, 7)]
+                   + [Btn(_dt(d["n"] > 6, "✏️ %d" % d["n"] if d["n"] > 6 else "✏️"), callback_data="%s:dn:custom" % p)],
+                   [Btn(_dt(not d["atleast"], "ঠিক N লস"), callback_data="%s:dx:0" % p), Btn(_dt(d["atleast"], "N বা বেশি"), callback_data="%s:dx:1" % p)],
+                   [Btn("▶️ চালিয়ে যাও", callback_data="%s:go:0" % p), Btn("❌ বাতিল", callback_data="%s:cancel:0" % p)]])
+
+
+def _dl_text(m):
+    d = S[m]["dl"]
+    g = sum(1 for r in d["rules"] if r[1] == "G")
+    ds = (" • তারিখ: " + ", ".join(x.strftime("%d %b") for x in d["dates"])) if d["dates"] else ""
+    return ("%s: দিনের সিগন্যাল লিস্ট পড়লাম (ইঞ্জিন ১০-এর হেডার নেই)\n"
+            "• টাইম ফ্রেম %d মিনিট • %d টা স্লট (🟢 %d, 🔴 %d) • %d পেয়ার%s\n\n"
+            "লিস্টে যেটা লেখা থাকে না সেটা বেছে নাও, তারপর ▶️ চাপো:\n"
+            "• MTG: %s\n• পরপর লস: %d টা (%s)") % (
+        NAME[m], d["tf"], len(d["rules"]), g, len(d["rules"]) - g, len({r[0] for r in d["rules"]}), ds,
+        DL_MTG[d["mtg"]], d["n"], "N বা বেশি" if d["atleast"] else "ঠিক N")
+
+
 async def _cmd(update, m):
     if not D["allowed"](update):
         return await D["deny"](update)
@@ -1155,7 +1243,8 @@ async def _cmd(update, m):
     LAST["m"] = m
     await update.effective_message.reply_text(
         "%s টেস্ট (রিপ্লে)\n\n/engine10-এর %s তালিকার রেজাল্ট টেক্সট এখানে পাঠাও (কপি করে পেস্ট)। একাধিক মেসেজ হলে সবগুলো পাঠাও, তারপর ✅ চাপো।\n"
-        "প্রথম মেসেজে হেডার লাইন (টাইম ফ্রেম, MTG, পরপর লস) থাকতে হবে।" % (NAME[m], "OTC" if m == "otc" else "রিয়েল মার্কেটের"), reply_markup=_kb_paste(m))
+        "প্রথম মেসেজে হেডার লাইন (টাইম ফ্রেম, MTG, পরপর লস) থাকতে হবে।\n\n"
+        "অথবা ইঞ্জিন ১২/১৪-এর দিনের সিগন্যাল লিস্ট (📅 তারিখ + M1 PAIR 02:05 PUT ✅ ...) পাঠাতে পারো; তখন MTG আর লস সংখ্যা বাটনে বেছে নেবে।" % (NAME[m], "OTC" if m == "otc" else "রিয়েল মার্কেটের"), reply_markup=_kb_paste(m))
 
 
 async def cmd_otctest(update, ctx):
@@ -1178,6 +1267,15 @@ async def on_text(update, ctx):
     if st["step"] == "paste":
         st["text"] += txt + "\n"
         await msg.reply_text("%s: পেয়েছি (এ পর্যন্ত %d লাইন)। আরও থাকলে পাঠাও, শেষ হলে ✅ চাপো।" % (NAME[m], st["text"].count("\n")), reply_markup=_kb_paste(m))
+        raise ApplicationHandlerStop
+    if st["step"] == "dln":
+        mm = re.search(r"\d+", _digits(txt))
+        if not mm or not (1 <= int(mm.group(0)) <= 20):
+            await msg.reply_text("১ থেকে ২০-এর মধ্যে একটা সংখ্যা লেখো (যেমন: 7)।")
+            raise ApplicationHandlerStop
+        st["dl"]["n"] = int(mm.group(0))
+        st["step"] = "dl"
+        await msg.reply_text(_dl_text(m), reply_markup=_kb_dl(m))
         raise ApplicationHandlerStop
     if st["step"] == "date":
         today = dt.datetime.now(BDT).date()
@@ -1279,6 +1377,12 @@ async def on_cb(update, ctx):
         if st["step"] != "paste":
             return await q.answer("আগে %s দাও" % CMD[m], show_alert=True)
         hdr, rules, err = parse(st["text"])
+        dl = None
+        if err:                                          # no /engine10 header -> maybe a day list of /engine12, /engine14 or /otctest
+            dl, _derr = parse_daylist(st["text"])
+            if dl:
+                err = None
+                rules = [dict(pair=p_, side=s_, minute=mi_, mtg=1) for p_, s_, mi_ in dl["rules"]]
         if not err:
             other = [r for r in rules if _mk(r["pair"]) != m]
             if other:
@@ -1288,11 +1392,45 @@ async def on_cb(update, ctx):
                     err = "তালিকায় রিয়েল ও OTC মিশে আছে। আলাদা আলাদা তালিকা দিয়ে %s আর %s চালাও।" % (CMD["otc"], CMD["real"])
         if err:
             return await q.answer(err[:190], show_alert=True)
+        if dl:
+            dl.update(mtg=max(dl["lvl"], 1), n=3, atleast=False)
+            st["dl"], st["step"] = dl, "dl"
+            LAST["m"] = m
+            await q.answer()
+            await q.message.reply_text(_dl_text(m), reply_markup=_kb_dl(m))
+            return
         st["hdr"], st["rules"], st["step"] = hdr, rules, "date"
         LAST["m"] = m
         await q.answer()
         await q.message.reply_text("📋 %s তালিকা পড়লাম:\n%s\n\nকোন তারিখে টেস্ট করবে? লেখো: 17 / 17,18,19 / 17-19 / 17/11 / গতকাল\n(তালিকা বানানোর পরের দিনের তারিখ দাও, নইলে ফলাফল চিট হবে)" % (
             NAME[m], summary_line(hdr, rules)), reply_markup=_kb_date(m))
+        return
+    if key in ("dm", "dn", "dx", "go"):
+        if st["step"] not in ("dl", "dln") or not st["dl"]:
+            return await q.answer("আগে %s দিয়ে লিস্ট পাঠাও" % CMD[m], show_alert=True)
+        d = st["dl"]
+        if key == "dm":
+            d["mtg"] = int(val)
+        elif key == "dx":
+            d["atleast"] = (val == "1")
+        elif key == "dn":
+            if val == "custom":
+                st["step"] = "dln"
+                await q.answer()
+                return await q.message.reply_text("✏️ পরপর কয়টা লস হলে সিগন্যাল ধরবে লেখো (১ থেকে ২০, যেমন: 7)।")
+            d["n"] = int(val)
+        elif key == "go":
+            hdr = dict(tf=d["tf"], n=d["n"], atleast=d["atleast"], mtgs=[d["mtg"]])
+            rules = [dict(pair=p_, side=s_, minute=mi_, mtg=d["mtg"]) for p_, s_, mi_ in d["rules"]]
+            st["hdr"], st["rules"], st["step"] = hdr, rules, "date"
+            await q.answer()
+            return await q.message.reply_text("📋 %s তালিকা পড়লাম:\n%s\n\nকোন তারিখে টেস্ট করবে? লেখো: 17 / 17,18,19 / 17-19 / 17/11 / গতকাল\n(তালিকা বানানোর পরের দিনের তারিখ দাও, নইলে ফলাফল চিট হবে)" % (
+                NAME[m], summary_line(hdr, rules)), reply_markup=_kb_date(m))
+        await q.answer()
+        try:
+            await q.edit_message_text(_dl_text(m), reply_markup=_kb_dl(m))
+        except BadRequest:
+            pass
         return
     if key == "mode":
         st["mode"] = "sum" if st["mode"] == "all" else "all"
