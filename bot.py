@@ -21,6 +21,7 @@ import engine2
 import live
 import oanda
 import pairs
+import style
 import resultsdb as rdb
 import source
 import importlib
@@ -773,7 +774,7 @@ async def cmd_engine2(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         prog = await msg.reply_text("⏳ ইঞ্জিন ২ শুরু…")
         ctx.application.bot_data["e2_job"] = asyncio.create_task(e2_job(msg.chat_id, prog, only))
         return
-    await msg.reply_text(e2_text(), reply_markup=e2_kb())
+    await msg.reply_text(style.fancy(e2_text()), reply_markup=e2_kb(), parse_mode="HTML")
 
 
 async def on_e2_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -791,7 +792,7 @@ async def on_e2_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await q.answer()
     E2[key] = {"months": int, "nmin": int, "acc": float}.get(key, str)(val)
     try:
-        await q.edit_message_text(e2_text(), reply_markup=e2_kb())
+        await q.edit_message_text(style.fancy(e2_text()), reply_markup=e2_kb(), parse_mode="HTML")
     except BadRequest:
         pass
 
@@ -946,7 +947,7 @@ async def cmd_engine3(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E10["wait"] = False
     E11["wait"] = False
     E9["wait"] = False
-    await update.effective_message.reply_text(e3_text(), reply_markup=e3_kb())
+    await update.effective_message.reply_text(style.fancy(e3_text()), reply_markup=e3_kb(), parse_mode="HTML")
 
 
 async def on_e3_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -971,7 +972,7 @@ async def on_e3_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E3["months"] = months
     E3["wait"] = False
     E3["page"] = "main"
-    await update.effective_message.reply_text(e3_text(), reply_markup=e3_kb())
+    await update.effective_message.reply_text(style.fancy(e3_text()), reply_markup=e3_kb(), parse_mode="HTML")
 
 
 async def on_e3_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -1030,7 +1031,7 @@ async def on_e3_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif key == "mclr":
         E3["minutes"] = []
     try:
-        await q.edit_message_text(e3_text(), reply_markup=e3_kb())
+        await q.edit_message_text(style.fancy(e3_text()), reply_markup=e3_kb(), parse_mode="HTML")
     except BadRequest:
         pass
 
@@ -1147,7 +1148,7 @@ async def cmd_engine6(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E11["wait"] = False
     E9["wait"] = False
     E3["wait"] = False
-    await update.effective_message.reply_text(e6_text(), reply_markup=e6_kb())
+    await update.effective_message.reply_text(style.fancy(e6_text()), reply_markup=e6_kb(), parse_mode="HTML")
 
 
 async def on_e6_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -1213,7 +1214,7 @@ async def on_e6_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif key == "mclr":
         E6["minutes"] = []
     try:
-        await q.edit_message_text(e6_text(), reply_markup=e6_kb())
+        await q.edit_message_text(style.fancy(e6_text()), reply_markup=e6_kb(), parse_mode="HTML")
     except BadRequest:
         pass
 
@@ -1230,7 +1231,7 @@ async def on_e6_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E11["wait"] = False
     E9["wait"] = False
     E6["page"] = "main"
-    await update.effective_message.reply_text(e6_text(), reply_markup=e6_kb())
+    await update.effective_message.reply_text(style.fancy(e6_text()), reply_markup=e6_kb(), parse_mode="HTML")
 
 
 
@@ -1362,7 +1363,7 @@ async def cmd_engine8(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E10["wait"] = False
     E11["wait"] = False
     E9["wait"] = False
-    await update.effective_message.reply_text(e8_text(), reply_markup=e8_kb())
+    await update.effective_message.reply_text(style.fancy(e8_text()), reply_markup=e8_kb(), parse_mode="HTML")
 
 
 async def on_e8_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -1423,7 +1424,7 @@ async def on_e8_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif key == "mclr":
         E8["minutes"] = []
     try:
-        await q.edit_message_text(e8_text(), reply_markup=e8_kb())
+        await q.edit_message_text(style.fancy(e8_text()), reply_markup=e8_kb(), parse_mode="HTML")
     except BadRequest:
         pass
 
@@ -1439,7 +1440,7 @@ async def on_e8_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E11["wait"] = False
     E9["wait"] = False
     E8["page"] = "main"
-    await update.effective_message.reply_text(e8_text(), reply_markup=e8_kb())
+    await update.effective_message.reply_text(style.fancy(e8_text()), reply_markup=e8_kb(), parse_mode="HTML")
 
 
 # ---------------------------------------------------------------- /engine9  (Engine 8's lowest-B2B minutes -> straight into Engine 4's loss-streak signals, as text)
@@ -1559,7 +1560,7 @@ async def cmd_engine9(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E10["wait"] = False
     E11["wait"] = False
     E9["wait"] = False
-    await update.effective_message.reply_text(e9_text(), reply_markup=e9_kb())
+    await update.effective_message.reply_text(style.fancy(e9_text()), reply_markup=e9_kb(), parse_mode="HTML")
 
 
 async def on_e9_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -1628,7 +1629,7 @@ async def on_e9_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif key == "pclr":
         E9["pairs"] = []
     try:
-        await q.edit_message_text(e9_text(), reply_markup=e9_kb())
+        await q.edit_message_text(style.fancy(e9_text()), reply_markup=e9_kb(), parse_mode="HTML")
     except BadRequest:
         pass
 
@@ -1648,7 +1649,7 @@ async def on_e9_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         E9["months"] = months
     E9["wait"] = False
     E9["page"] = "main"
-    await update.effective_message.reply_text(e9_text(), reply_markup=e9_kb())
+    await update.effective_message.reply_text(style.fancy(e9_text()), reply_markup=e9_kb(), parse_mode="HTML")
 
 
 # ---------------------------------------------------------------- /engine10  (Signal Radar: Engine 9's 100% slots -> live UP/DOWN alerts)
@@ -1787,7 +1788,7 @@ async def cmd_engine10(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E9["wait"] = False
     E10["wait"] = False
     E11["wait"] = False
-    await update.effective_message.reply_text(e10_text(), reply_markup=e10_kb())
+    await update.effective_message.reply_text(style.fancy(e10_text()), reply_markup=e10_kb(), parse_mode="HTML")
 
 
 async def on_e10_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -1878,7 +1879,7 @@ async def on_e10_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif key == "pclr":
         E10["pairs"] = []
     try:
-        await q.edit_message_text(e10_text(), reply_markup=e10_kb())
+        await q.edit_message_text(style.fancy(e10_text()), reply_markup=e10_kb(), parse_mode="HTML")
     except BadRequest:
         pass
 
@@ -1903,7 +1904,7 @@ async def on_e10_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         E10["months"] = months
     E10["wait"] = False
     E10["page"] = "main"
-    await update.effective_message.reply_text(e10_text(), reply_markup=e10_kb())
+    await update.effective_message.reply_text(style.fancy(e10_text()), reply_markup=e10_kb(), parse_mode="HTML")
 
 
 # ---------------------------------------------------------------- /engine11  (Engine 10 + where the back-test period ends: DB's last day or a custom date)
@@ -2102,7 +2103,7 @@ async def cmd_engine11(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     E9["wait"] = False
     E10["wait"] = False
     E11["wait"] = False
-    await update.effective_message.reply_text(e11_text(), reply_markup=e11_kb())
+    await update.effective_message.reply_text(style.fancy(e11_text()), reply_markup=e11_kb(), parse_mode="HTML")
 
 
 def _e11_other_waits_off():
@@ -2180,7 +2181,7 @@ async def on_e11_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "(আজ %s। আজকের বা ভবিষ্যতের অসম্পূর্ণ দিন ব্যাক-টেস্টে ধরা হয় না।)" % (
                 e3_label(E11["months"]), today.isoformat()))
         try:
-            await q.edit_message_text(e11_text(), reply_markup=e11_kb())
+            await q.edit_message_text(style.fancy(e11_text()), reply_markup=e11_kb(), parse_mode="HTML")
         except BadRequest:
             pass
         return
@@ -2222,7 +2223,7 @@ async def on_e11_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif key == "pclr":
         E11["pairs"] = []
     try:
-        await q.edit_message_text(e11_text(), reply_markup=e11_kb())
+        await q.edit_message_text(style.fancy(e11_text()), reply_markup=e11_kb(), parse_mode="HTML")
     except BadRequest:
         pass
 
@@ -2259,7 +2260,7 @@ async def on_e11_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         E11["months"] = months
     E11["wait"] = False
     E11["page"] = "main"
-    await update.effective_message.reply_text(e11_text(), reply_markup=e11_kb())
+    await update.effective_message.reply_text(style.fancy(e11_text()), reply_markup=e11_kb(), parse_mode="HTML")
 
 
 # ---------------------------------------------------------------- /engine4  (Loss-streak signal finder)
@@ -2384,7 +2385,7 @@ async def cmd_engine4(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         E4["pairs"] = list(dict.fromkeys(only))
         E4["mkt"] = "otc" if pairs.is_otc(only[0]) else "real"
     E4["page"] = "main"
-    await update.effective_message.reply_text(e4_text(), reply_markup=e4_kb())
+    await update.effective_message.reply_text(style.fancy(e4_text()), reply_markup=e4_kb(), parse_mode="HTML")
 
 
 async def on_e4_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -2440,7 +2441,7 @@ async def on_e4_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif key == "mclr":
         E4["minutes"] = []
     try:
-        await q.edit_message_text(e4_text(), reply_markup=e4_kb())
+        await q.edit_message_text(style.fancy(e4_text()), reply_markup=e4_kb(), parse_mode="HTML")
     except BadRequest:
         pass
 

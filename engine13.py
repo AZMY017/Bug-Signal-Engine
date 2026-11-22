@@ -1216,6 +1216,7 @@ from telegram.error import BadRequest
 from telegram.ext import ApplicationHandlerStop, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 import pairs
+import style
 import source
 
 log = logging.getLogger("engine13")
@@ -1960,7 +1961,7 @@ async def cmd_engine13(update, ctx):
         E["mkt"] = "otc" if pairs.is_otc(only[0]) else "real"
     E["page"], E["wait"] = "main", False
     _release_e12()
-    await update.effective_message.reply_text(e13_text(), reply_markup=e13_kb())
+    await update.effective_message.reply_text(style.fancy(e13_text()), reply_markup=e13_kb(), parse_mode="HTML")
 
 
 def _ask(key):
@@ -2025,7 +2026,7 @@ async def on_cb(update, ctx):
         E["days"], E["wait"], E["wait_at"] = "custom", "dates", time.time()
         await q.message.reply_text(_ask("dates"))
         try:
-            await q.edit_message_text(e13_text(), reply_markup=e13_kb())
+            await q.edit_message_text(style.fancy(e13_text()), reply_markup=e13_kb(), parse_mode="HTML")
         except BadRequest:
             pass
         return
@@ -2070,7 +2071,7 @@ async def on_cb(update, ctx):
     elif key == "pclr":
         E["pairs"] = []
     try:
-        await q.edit_message_text(e13_text(), reply_markup=e13_kb())
+        await q.edit_message_text(style.fancy(e13_text()), reply_markup=e13_kb(), parse_mode="HTML")
     except BadRequest:
         pass
 
@@ -2129,7 +2130,7 @@ async def on_text(update, ctx):
             raise ApplicationHandlerStop
         E["months"] = months
     E["wait"], E["page"] = False, "main"
-    await msg.reply_text(e13_text(), reply_markup=e13_kb())
+    await msg.reply_text(style.fancy(e13_text()), reply_markup=e13_kb(), parse_mode="HTML")
     raise ApplicationHandlerStop
 
 

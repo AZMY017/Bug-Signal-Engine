@@ -1216,6 +1216,7 @@ from telegram.error import BadRequest
 from telegram.ext import ApplicationHandlerStop, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 import pairs
+import style
 import source
 
 log = logging.getLogger("engine12")
@@ -1671,7 +1672,7 @@ def e12_text():
     lines = [
         "🧪 ইঞ্জিন ১২ — অটো ব্যাক-টেস্ট + রিপ্লে টেস্ট", "",
         "ইঞ্জিন ১১-এর তালিকা বানানো আর /otctest-এর রিপ্লে একসাথে। তুমি টেস্টের দিন বাছো; প্রতিটা দিনের জন্য বট তার আগের দিন পর্যন্ত "
-        "ডেটা দিয়ে ১০০% উইনের তালিকা বানায়, তারপর ওই দিনের ক্যান্ডেলে রিপ্লে চালায়। কপি-পেস্ট লাগে না, আর টেস্টের দিনের ডেটা তালিকায় ঢুকে চিট হয় না।", "",
+        "ডেটা দিয়ে ১০০% উইনের তালিকা বানায়, তারপর ওই দিনের ক্যান্ডেলে রিপ্লে চালায়। কপি-পেস্ট লাগে না। টেস্টের দিনের ডেটা তালিকায় ঢোকে না, তাই আগাম ফলাফল দেখে ফেলার ফাঁকি থাকে না।", "",
         "⚙️ সেটিং:",
         "• টেস্টের দিন: %s%s" % (dates_label(), (" (%d দিন)" % len(test_dates())) if len(test_dates()) > 1 else ""),
         "• টাইম ফ্রেম: %d মিনিট" % E["tf"],
@@ -1799,7 +1800,7 @@ async def cmd_engine12(update, ctx):
         E["pairs"] = list(dict.fromkeys(only))
         E["mkt"] = "otc" if pairs.is_otc(only[0]) else "real"
     E["page"], E["wait"] = "main", False
-    await update.effective_message.reply_text(e12_text(), reply_markup=e12_kb())
+    await update.effective_message.reply_text(style.fancy(e12_text()), reply_markup=e12_kb(), parse_mode="HTML")
 
 
 def _ask(key):
@@ -1859,7 +1860,7 @@ async def on_cb(update, ctx):
         E["days"], E["wait"], E["wait_at"] = "custom", "dates", time.time()
         await q.message.reply_text(_ask("dates"))
         try:
-            await q.edit_message_text(e12_text(), reply_markup=e12_kb())
+            await q.edit_message_text(style.fancy(e12_text()), reply_markup=e12_kb(), parse_mode="HTML")
         except BadRequest:
             pass
         return
@@ -1895,7 +1896,7 @@ async def on_cb(update, ctx):
     elif key == "pclr":
         E["pairs"] = []
     try:
-        await q.edit_message_text(e12_text(), reply_markup=e12_kb())
+        await q.edit_message_text(style.fancy(e12_text()), reply_markup=e12_kb(), parse_mode="HTML")
     except BadRequest:
         pass
 
@@ -1948,7 +1949,7 @@ async def on_text(update, ctx):
             raise ApplicationHandlerStop
         E["months"] = months
     E["wait"], E["page"] = False, "main"
-    await msg.reply_text(e12_text(), reply_markup=e12_kb())
+    await msg.reply_text(style.fancy(e12_text()), reply_markup=e12_kb(), parse_mode="HTML")
     raise ApplicationHandlerStop
 
 
