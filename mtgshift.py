@@ -479,7 +479,7 @@ async def on_cb(update, ctx):
 
 
 async def on_text(update, ctx):
-    """Group -7: reads a forwarded/pasted day list while armed (or the typed number of a ✏️ prompt). Everything else passes through."""
+    """Group -10 (own group: engine14 also used -7, and a group runs only its first matching handler): reads a forwarded/pasted day list while armed (or the typed number of a ✏️ prompt). Everything else passes through."""
     msg = update.effective_message
     if not msg or not msg.text:
         return
@@ -641,9 +641,9 @@ def register(app, send, allowed, deny, lock, bot_getter):
     app.add_handler(CommandHandler("mtgshift", cmd_mtgshift))
     app.add_handler(CallbackQueryHandler(on_cb, pattern=r"^ms:"))
     app.add_handler(CommandHandler(["engine3", "engine4", "engine6", "engine8", "engine9", "engine10", "engine11", "engine12", "engine13", "engine14",
-                                    "otctest", "realtest", "bugotcchecker"], _clear_wait), group=-9)
-    app.add_handler(CallbackQueryHandler(_clear_wait, pattern=r"^(e3|e4|e6|e8|e9|e10|e11|e12|e13|e14|ot|rt|bo):"), group=-9)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text), group=-7)
+                                    "otctest", "realtest", "bugotcchecker"], _clear_wait), group=-11)
+    app.add_handler(CallbackQueryHandler(_clear_wait, pattern=r"^(e3|e4|e6|e8|e9|e10|e11|e12|e13|e14|ot|rt|bo):"), group=-11)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text), group=-10)
 
 
 COMMAND = BotCommand("mtgshift", "MTG শিফট: প্রথম ক্যান্ডেল বাদ দিয়ে পরের ক্যান্ডেল থেকে ঢুকলে রেজাল্ট")
