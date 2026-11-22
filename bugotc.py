@@ -38,8 +38,14 @@ CACHE_TTL, CACHE_MAX = 600, 120
 SUP = {1: "¹", 2: "²", 3: "³"}
 MTG_LB = {0: "নন-MTG", 1: "MTG1", 2: "MTG2", 3: "MTG3"}
 PAY_PRESETS = (70, 75, 80, 85)
+VIEW_LB = {"all": "📋 সব সিগন্যাল দেখাও", "trade": "💹 শুধু ট্রেড সিগন্যাল"}
+
+
+def _trade():
+    """True = 'শুধু ট্রেড সিগন্যাল' view: low-payout (and no-data) rows are not listed and not counted; only ✅ / ❌ rows remain."""
+    return S["view"] == "trade"
 D = {}                          # injected by register(): send, allowed, deny, lock, bot
-S = dict(mtg=1, pay=80.0, wait=False, wait_at=0.0, armed=False, armed_at=0.0, last_date=None, days={}, buf=[], gen=0, task=None, prompt=None)
+S = dict(mtg=1, pay=80.0, view="all", wait=False, wait_at=0.0, armed=False, armed_at=0.0, last_date=None, days={}, buf=[], gen=0, task=None, prompt=None)
 _LOCK = []                      # one asyncio.Lock (created on first use): two batches are never processed at the same time
 _CACHE = {}                     # (pair, date) -> (stored_at, open[], close[], payout[])
 
@@ -272,8 +278,12 @@ def _rate(w, l):
 
 def build_messages(d, rows, width, st_line, day_all=None):
     """rows = [(it, kind, v)] of THIS forwarded message -> list of HTML messages (<= ~3300 chars of rows each)."""
+    full = rows
+    if _trade():
+        rows = [r for r in rows if r[1] in ("win", "loss")]
+        width = max([len(pairs.pretty(it["pair"])) for it, _k, _v in rows] or [1])
     lines = ["M%d %s %02d:%02d %s %s" % (it["tf"], pairs.pretty(it["pair"]).ljust(width), it["E"] // 60, it["E"] % 60, it["side"], mark(k, v))
-             for it, k, v in rows]
+             for it, k, v in rows] or ["(কোনো ট্রেড সিগন্যাল নেই)"]
     head = "📅 - %s\n▬▬▬▬▬▬▬▬▬ • ▬▬▬▬▬▬▬▬▬\n" % d.strftime("%Y.%m.%d")
     parts, cur, size = [], [], 0
     for r in lines:
@@ -284,20 +294,28 @@ def build_messages(d, rows, width, st_line, day_all=None):
         size += len(r) + 1
     if cur:
         parts.append(cur)
-    n = counts([(k, v) for _it, k, v in rows])
-    foot = ["▬▬▬▬▬▬▬▬▬ • ▬▬▬▬▬▬▬▬▬",
-            "🏆 Total : %d" % len(rows), "✅ Win: %d" % n["win"]] + _split_lines(n) + ["❌ Loss: %d" % n["loss"],
-            "📉 কম পেআউট (পার্সেন্ট দেখানো): %d" % n["low"],
-            "ট্রেড সিগন্যাল: %d (✅ %d + ❌ %d)" % (n["win"] + n["loss"], n["win"], n["loss"])]
+    n = counts([(k, v) for _it, k, v in full])
+    if _trade():
+        foot = ["▬▬▬▬▬▬▬▬▬ • ▬▬▬▬▬▬▬▬▬",
+                "🏆 Total : %d" % (n["win"] + n["loss"]), "✅ Win: %d" % n["win"]] + _split_lines(n) + ["❌ Loss: %d" % n["loss"]]
+    else:
+        foot = ["▬▬▬▬▬▬▬▬▬ • ▬▬▬▬▬▬▬▬▬",
+                "🏆 Total : %d" % len(rows), "✅ Win: %d" % n["win"]] + _split_lines(n) + ["❌ Loss: %d" % n["loss"],
+                "📉 কম পেআউট (পার্সেন্ট দেখানো): %d" % n["low"],
+                "ট্রেড সিগন্যাল: %d (✅ %d + ❌ %d)" % (n["win"] + n["loss"], n["win"], n["loss"])]
     if n["nopay"] or n["miss"]:
-        foot.append("❔ ডেটা/পেআউট নেই: %d" % (n["nopay"] + n["miss"]))
+        foot.append("❔ ডেটা/পেআউট নেই: %d%s" % (n["nopay"] + n["miss"], " (লিস্টে দেখানো হয়নি)" if _trade() else ""))
     foot.append("🎯 উইন রেট: %s" % _rate(n["win"], n["loss"]))
     if day_all is not None:
         a = counts(day_all)
-        foot.append("📅 পুরো দিন (এ পর্যন্ত ফরওয়ার্ড): Total %d • ট্রেড সিগন্যাল %d • ✅ %d • ❌ %d • 📉 %d • %s" % (
-            len(day_all), a["win"] + a["loss"], a["win"], a["loss"], a["low"], _rate(a["win"], a["loss"])))
+        if _trade():
+            foot.append("📅 পুরো দিন (এ পর্যন্ত ফরওয়ার্ড): Total %d • ✅ %d • ❌ %d • %s" % (
+                a["win"] + a["loss"], a["win"], a["loss"], _rate(a["win"], a["loss"])))
+        else:
+            foot.append("📅 পুরো দিন (এ পর্যন্ত ফরওয়ার্ড): Total %d • ট্রেড সিগন্যাল %d • ✅ %d • ❌ %d • 📉 %d • %s" % (
+                len(day_all), a["win"] + a["loss"], a["win"], a["loss"], a["low"], _rate(a["win"], a["loss"])))
         foot.append("   ✅ ভাগ: " + _split_inline(a))
-    foot.append("⚙️ %s • পেআউট ন্যূনতম %s%%" % (st_line, ("%g" % S["pay"])))
+    foot.append("⚙️ %s • পেআউট ন্যূনতম %s%%%s" % (st_line, ("%g" % S["pay"]), " • শুধু ট্রেড সিগন্যাল" if _trade() else ""))
     out = []
     for i, part in enumerate(parts):
         h = head if len(parts) == 1 else head + "(%d/%d)\n" % (i + 1, len(parts))
@@ -313,27 +331,37 @@ def build_summary(per_day, st_line):
     tot = dict(win=0, loss=0, low=0, nopay=0, miss=0, w=[0, 0, 0, 0])
     one_month = len({(d.year, d.month) for d, _n in per_day}) == 1
     steps = list(range(S["mtg"] + 1))
-    heads = ["Day", "Tot", "Trd", "W", "L", "Low", "Rate"] + ["N" if k == 0 else "M%d" % k for k in steps]
+    tr = _trade()
+    heads = (["Day", "Trd", "W", "L", "Rate"] if tr else ["Day", "Tot", "Trd", "W", "L", "Low", "Rate"]) + ["N" if k == 0 else "M%d" % k for k in steps]
     rows = []
     for d, n in per_day:
         for k in ("win", "loss", "low", "nopay", "miss"):
             tot[k] += n[k]
         for i in range(4):
             tot["w"][i] += n["w"][i]
-        rows.append([d.strftime("%d" if one_month else "%m.%d"), sum(n[k] for k in ("win", "loss", "low", "nopay", "miss")), n["win"] + n["loss"],
-                     n["win"], n["loss"], n["low"], _rate(n["win"], n["loss"])] + [n["w"][k] for k in steps])
-    allrow = ["All", sum(tot[k] for k in ("win", "loss", "low", "nopay", "miss")), tot["win"] + tot["loss"], tot["win"], tot["loss"], tot["low"],
-              _rate(tot["win"], tot["loss"])] + [tot["w"][k] for k in steps]
+        dn = d.strftime("%d" if one_month else "%m.%d")
+        if tr:
+            rows.append([dn, n["win"] + n["loss"], n["win"], n["loss"], _rate(n["win"], n["loss"])] + [n["w"][k] for k in steps])
+        else:
+            rows.append([dn, sum(n[k] for k in ("win", "loss", "low", "nopay", "miss")), n["win"] + n["loss"],
+                         n["win"], n["loss"], n["low"], _rate(n["win"], n["loss"])] + [n["w"][k] for k in steps])
+    if tr:
+        allrow = ["All", tot["win"] + tot["loss"], tot["win"], tot["loss"], _rate(tot["win"], tot["loss"])] + [tot["w"][k] for k in steps]
+    else:
+        allrow = ["All", sum(tot[k] for k in ("win", "loss", "low", "nopay", "miss")), tot["win"] + tot["loss"], tot["win"], tot["loss"], tot["low"],
+                  _rate(tot["win"], tot["loss"])] + [tot["w"][k] for k in steps]
     wd = [max(len(str(r[i])) for r in rows + [allrow, heads]) for i in range(len(heads))]
 
     def fmt(r):
         return " ".join(str(v).rjust(wd[i]) for i, v in enumerate(r))
     head = fmt(heads)
     lines = [head] + [fmt(r) for r in rows] + ["-" * len(head), fmt(allrow)]
-    legend = "Tot=মোট • Trd=ট্রেড সিগন্যাল (W+L) • W=উইন • L=লস • Low=কম পেআউট • N=নন-MTG • M1/M2=MTG ধাপে উইন"
+    legend = ("Trd=ট্রেড সিগন্যাল (W+L) • W=উইন • L=লস • N=নন-MTG • M1/M2=MTG ধাপে উইন" if tr else
+              "Tot=মোট • Trd=ট্রেড সিগন্যাল (W+L) • W=উইন • L=লস • Low=কম পেআউট • N=নন-MTG • M1/M2=MTG ধাপে উইন")
     extra = ("\n❔ ডেটা/পেআউট নেই: %d" % (tot["nopay"] + tot["miss"])) if (tot["nopay"] or tot["miss"]) else ""
-    return "📊 সারসংক্ষেপ (%d দিন)\n<pre>%s</pre>\n%s%s\n⚙️ %s • পেআউট ন্যূনতম %s%%" % (
-        len(per_day), html.escape("\n".join(lines), quote=False), html.escape(legend), extra, html.escape(st_line), "%g" % S["pay"])
+    return "📊 সারসংক্ষেপ (%d দিন)\n<pre>%s</pre>\n%s%s\n⚙️ %s • পেআউট ন্যূনতম %s%%%s" % (
+        len(per_day), html.escape("\n".join(lines), quote=False), html.escape(legend), extra, html.escape(st_line), "%g" % S["pay"],
+        " • শুধু ট্রেড সিগন্যাল" if tr else "")
 
 
 # ---------------------------------------------------------------- Telegram glue
@@ -347,8 +375,8 @@ def text_main():
             "/engine14-এর দিনের মেসেজ (📅 তারিখসহ) এখানে ফরওয়ার্ড করো — একসাথে অনেক মেসেজ/অনেক দিন ফরওয়ার্ড বা পেস্ট করা যায় (তারিখ না থাকলে আগের মেসেজের তারিখ ধরা হয়)। পাঠানো শেষ হলে বট জিজ্ঞেস করবে — ✅ চাপলে সব একবারে হিসাব হবে। প্রতিটা সিগন্যালের ওই মিনিটের পেআউট %% ডাটাবেজ থেকে দেখে:\n"
             "• পেআউট ≥ %g%% → রেজাল্ট: ✅ সরাসরি, ✅¹ ✅² ✅³ MTG ধাপে উইন, ❌ লস\n"
             "• পেআউট < %g%% → রেজাল্টের জায়গায় পার্সেন্ট (যেমন 77%%), উইন/লসে গোনা হয় না\n\n"
-            "MTG: %s • পেআউট ন্যূনতম: %g%%\n%s") % (
-        S["pay"], S["pay"], MTG_LB[S["mtg"]], S["pay"],
+            "MTG: %s • পেআউট ন্যূনতম: %g%%\nলিস্ট: %s\n%s") % (
+        S["pay"], S["pay"], MTG_LB[S["mtg"]], S["pay"], VIEW_LB[S["view"]],
         "🟢 ফরওয়ার্ডের অপেক্ষায় আছি (একের পর এক অনেক মেসেজ ফরওয়ার্ড করা যাবে)" if on else "⚪ বন্ধ — /bugotcchecker চাপলে চালু হবে")
 
 
@@ -359,6 +387,7 @@ def kb_main():
     return Markup([
         [Btn(_tick(S["mtg"] == v, lb), callback_data="bo:mtg:%d" % v) for v, lb in MTG_LB.items()],
         pay_row,
+        [Btn(_tick(S["view"] == v, lb), callback_data="bo:view:%s" % v) for v, lb in VIEW_LB.items()],
         [Btn("🧹 দিনের হিসাব মুছো", callback_data="bo:clr:0"), Btn("⏹ বন্ধ", callback_data="bo:off:0")]])
 
 
@@ -377,6 +406,8 @@ async def on_cb(update, ctx):
     await q.answer()
     if key == "mtg":
         S["mtg"] = int(val)
+    elif key == "view":
+        S["view"] = "trade" if val == "trade" else "all"
     elif key == "pay" and val == "custom":
         S["wait"], S["wait_at"] = True, time.time()
         await q.message.reply_text("✏️ কত পার্সেন্টের নিচে হলে রেজাল্ট দেখাবে না সেটা লেখো (যেমন: 80 অথবা 85)। ১ থেকে 100।")
@@ -545,7 +576,7 @@ async def _process(chat_id):
             day = S["days"].setdefault(d, {})
             for it, k, v in rows:
                 day[it["key"]] = (k, v)
-            width = max(len(pairs.pretty(it["pair"])) for it in its)
+            width = max(len(pairs.pretty(it["pair"])) for it in its)       # (trade view recomputes it from the shown rows)
             day_all = [kv for kv in day.values()] if len(day) > len(rows) else None
             for t in build_messages(d, rows, width, MTG_LB[S["mtg"]], day_all):
                 await D["send"](chat_id, t, parse_mode="HTML")
