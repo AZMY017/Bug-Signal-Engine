@@ -139,7 +139,7 @@ LEGEND = ("✅ = টেস্ট পিরিয়ডেও টিকেছে 
 
 
 def _head_cmds_all():
-    return ("/check USDJPY 30 UP 12-24 — একটা নির্দিষ্ট স্লটের হিসাব\n/engine3 — ইঞ্জিন ৩ (মিনিট গ্রিড: G/R টেবিল + উইন রেশিও, PDF/CSV)\n/engine4 — ইঞ্জিন ৪ (ব্যাক-টু-ব্যাক লসের পর সিগন্যাল গোনা)\n/engine6 — ইঞ্জিন ৬ (ইঞ্জিন ৩-এর মতো, কিন্তু গ্রিন/রেড আলাদা চার্ট, একদিনের কম B2B লস আগে)\n/engine8 — ইঞ্জিন ৮ (ইঞ্জিন ৬-এর হিসাব, শুধু টেক্সট: গ্রিন/রেডের সর্বনিম্ন B2B লসের মিনিটগুলো)\n/engine9 — ইঞ্জিন ৯ (ইঞ্জিন ৮-এর মিনিটগুলো সরাসরি ইঞ্জিন ৪-এর সিগন্যাল গণনায়, শুধু টেক্সট)\n/engine10 — ইঞ্জিন ১০ সিগন্যাল রাডার (১০০% উইনের স্লট থেকে লাইভ UP/DOWN অ্যালার্ট + রেজাল্ট)\n/engine11 — ইঞ্জিন ১১ (ইঞ্জিন ১০-এর মতো, সাথে ব্যাক-টেস্ট কোন তারিখ পর্যন্ত হবে সেটা বাছাই: ডাটাবেজের শেষ দিন অথবা কাস্টম তারিখ)\n/engine12 — ইঞ্জিন ১২ (ইঞ্জিন ১১-এর তালিকা + OTC টেস্ট রিপ্লে একসাথে, কপি-পেস্ট ছাড়া)\n/engine13 — ইঞ্জিন ১৩ (ইঞ্জিন ১২ + EMA ফিল্টার: কোন EMA সেটিং সবচেয়ে ভালো ছাঁকে)\n/engine14 — ইঞ্জিন ১৪ (ইঞ্জিন ১২-এর দ্রুত স্বাধীন কপি: একই ফলাফল, কম সময়ে)\n/bugotcchecker — বাগ OTC চেকার (ইঞ্জিনের দিনের লিস্ট ফরওয়ার্ড করলে প্রতিটা সিগন্যালের পেআউট % ও রেজাল্ট, কম পেআউটে শুধু পার্সেন্ট)\n/mtgshift — MTG শিফট (লিস্ট ফরওয়ার্ড করলে প্রথম ক্যান্ডেল বাদ, পরের ক্যান্ডেল থেকে ঢুকলে নন-MTG/MTG1 রেজাল্ট)\n/live — লাইভ অ্যালার্ট চালু/বন্ধ\n/status — অবস্থা\n/data — ডেটা কভারেজ\n/db — ডাটাবেজ সাইজ + কত দিনের ডেটা জমা (রিয়েল ও OTC)\n/otctest — OTC তালিকা পেস্ট করে কোনো দিনের রিপ্লে টেস্ট\n/realtest — রিয়েল তালিকা পেস্ট করে কোনো দিনের রিপ্লে টেস্ট\n/id — আমার Telegram ID")
+    return ("/others — অন্যান্য কমান্ড বাটন আকারে (লাইভ, স্ট্যাটাস, ডেটা, চেক, ইঞ্জিন ৩, ৪, ৯, ১০, ১১, ১২, ১৩)\n/engine6 — ইঞ্জিন ৬ (ইঞ্জিন ৩-এর মতো, কিন্তু গ্রিন/রেড আলাদা চার্ট, একদিনের কম B2B লস আগে)\n/engine8 — ইঞ্জিন ৮ (ইঞ্জিন ৬-এর হিসাব, শুধু টেক্সট: গ্রিন/রেডের সর্বনিম্ন B2B লসের মিনিটগুলো)\n/engine14 — ইঞ্জিন ১৪ (ইঞ্জিন ১২-এর দ্রুত স্বাধীন কপি: একই ফলাফল, কম সময়ে)\n/bugotcchecker — বাগ OTC চেকার (ইঞ্জিনের দিনের লিস্ট ফরওয়ার্ড করলে প্রতিটা সিগন্যালের পেআউট % ও রেজাল্ট, কম পেআউটে শুধু পার্সেন্ট)\n/mtgshift — MTG শিফট (লিস্ট ফরওয়ার্ড করলে প্রথম ক্যান্ডেল বাদ, পরের ক্যান্ডেল থেকে ঢুকলে নন-MTG/MTG1 রেজাল্ট)\n/db — ডাটাবেজ সাইজ + কত দিনের ডেটা জমা (রিয়েল ও OTC)\n/otctest — OTC তালিকা পেস্ট করে কোনো দিনের রিপ্লে টেস্ট\n/realtest — রিয়েল তালিকা পেস্ট করে কোনো দিনের রিপ্লে টেস্ট\n/id — আমার Telegram ID")
 
 
 def head_cmds():
@@ -2446,6 +2446,53 @@ async def on_e4_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         pass
 
 
+# ---------------------------------------------------------------- /others  (hidden commands as buttons)
+# Commands listed here are NOT in the "/" menu or the /start list any more; /others shows them as buttons.
+# The typed commands (/live, /engine3 ...) still work. To move one more command here: add a line below, then remove its
+# BotCommand from post_init and its line from _head_cmds_all.
+def _others_items():
+    items = [("live", "🔔 লাইভ অ্যালার্ট", cmd_live), ("status", "📊 স্ট্যাটাস", cmd_status), ("data", "🗂 ডেটা কভারেজ", cmd_data),
+             ("check", "🔍 স্লট চেক", cmd_check)]
+    if engine3 is not None:
+        items.append(("engine3", "ইঞ্জিন ৩", cmd_engine3))
+    if engine4 is not None:
+        items.append(("engine4", "ইঞ্জিন ৪", cmd_engine4))
+    if engine9 is not None:
+        items.append(("engine9", "ইঞ্জিন ৯", cmd_engine9))
+    if radar is not None:
+        items.append(("engine10", "ইঞ্জিন ১০", cmd_engine10))
+    if radar11 is not None:
+        items.append(("engine11", "ইঞ্জিন ১১", cmd_engine11))
+    if engine12 is not None:
+        items.append(("engine12", "ইঞ্জিন ১২", engine12.cmd_engine12))
+    if engine13 is not None:
+        items.append(("engine13", "ইঞ্জিন ১৩", engine13.cmd_engine13))
+    return items
+
+
+async def cmd_others(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return await deny(update)
+    btns = [Btn(lb, callback_data="oth:" + name) for name, lb, _fn in _others_items()]
+    rows = [btns[i:i + 2] for i in range(0, len(btns), 2)]
+    await update.effective_message.reply_text("📂 অন্যান্য — যেটা চালাতে চাও চাপো:", reply_markup=Markup(rows))
+
+
+async def on_others_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    if not allowed(update):
+        return await q.answer("অনুমতি নেই", show_alert=True)
+    await q.answer()
+    fn = {n: f for n, _lb, f in _others_items()}.get(q.data.split(":", 1)[1])
+    if fn is None:
+        return
+    for m in (engine12, engine13, engine14, bugotc, mtgshift):      # same as typing a command: forget a pending ✏️ prompt
+        cw = getattr(m, "_clear_wait", None) if m is not None else None
+        if cw:
+            await cw(update, ctx)
+    await fn(update, ctx)       # ctx.args is empty (so /check shows its usage text)
+
+
 # ---------------------------------------------------------------- background
 async def auto_scan_loop(app):
     """Neon is read only when a scan is due (the next due time is kept in memory), so it can sleep in between."""
@@ -2478,22 +2525,13 @@ async def post_init(app):
     global APP
     APP = app
     _eng_cmds = [
-        (engine3, BotCommand("engine3", "ইঞ্জিন ৩: মিনিট গ্রিড (G/R টেবিল, PDF/CSV)")),
-        (engine4, BotCommand("engine4", "ইঞ্জিন ৪: ব্যাক-টু-ব্যাক লসের পর সিগন্যাল")),
         (engine6, BotCommand("engine6", "ইঞ্জিন ৬: গ্রিন/রেড র‍্যাংকড চার্ট (একদিনের কম B2B লস আগে)")),
         (engine8, BotCommand("engine8", "ইঞ্জিন ৮: সর্বনিম্ন B2B লসের মিনিট টেক্সটে (গ্রিন/রেড)")),
-        (engine9, BotCommand("engine9", "ইঞ্জিন ৯: ইঞ্জিন ৮ এর মিনিট সরাসরি ইঞ্জিন ৪ এ (টেক্সট)")),
-        (radar, BotCommand("engine10", "ইঞ্জিন ১০: সিগন্যাল রাডার (১০০% স্লটের লাইভ UP/DOWN অ্যালার্ট)")),
-        (radar11, BotCommand("engine11", "ইঞ্জিন ১১: রাডার + কাস্টম তারিখ/ডাটাবেজ-শেষ থেকে ব্যাক-টেস্ট")),
     ]
-    cmds = [c for m, c in _eng_cmds if m is not None] + [BotCommand("live", "লাইভ অ্যালার্ট"), BotCommand("status", "অবস্থা"), BotCommand("data", "ডেটা কভারেজ"), BotCommand("db", "ডাটাবেজ: সাইজ, কত দিনের ডেটা (রিয়েল + OTC)"), BotCommand("check", "একটা স্লটের হিসাব দেখো"),
+    cmds = [BotCommand("others", "অন্যান্য: লাইভ, স্ট্যাটাস, ডেটা, চেক, ইঞ্জিন ৩/৪/৯/১০/১১/১২/১৩ বাটনে")] + [c for m, c in _eng_cmds if m is not None] + [BotCommand("db", "ডাটাবেজ: সাইজ, কত দিনের ডেটা (রিয়েল + OTC)"),
             BotCommand("id", "আমার Telegram ID")]
     if otctest is not None:
         cmds += [otctest.COMMAND, otctest.COMMAND_REAL]
-    if engine12 is not None:
-        cmds.append(engine12.COMMAND)
-    if engine13 is not None:
-        cmds.append(engine13.COMMAND)
     if engine14 is not None:
         cmds.append(engine14.COMMAND)
     if bugotc is not None:
@@ -2586,6 +2624,8 @@ def main():
     if radar11 is not None:
         app.add_handler(CommandHandler("engine11", cmd_engine11))
     app.add_handler(CommandHandler("id", cmd_id))
+    app.add_handler(CommandHandler("others", cmd_others))
+    app.add_handler(CallbackQueryHandler(on_others_cb, pattern=r"^oth:"))
     app.add_handler(CallbackQueryHandler(on_live_cb, pattern=r"^lv:"))
     if engine3 is not None:
         app.add_handler(CallbackQueryHandler(on_e3_cb, pattern=r"^e3:"))
