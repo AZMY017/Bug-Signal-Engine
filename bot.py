@@ -48,6 +48,7 @@ otctest = _opt("otctest")        # /otctest, /realtest
 engine12 = _opt("engine12")      # /engine12 (own file: engine11 back-test + otctest replay in one go)
 engine13 = _opt("engine13")      # /engine13 (own file: engine12 + EMA trend filter, walk-forward)
 engine14 = _opt("engine14")      # /engine14 (own file: fast independent copy of engine12)
+engine15 = _opt("engine15")      # /engine15 (own file: copy of engine14, minutes = every minute whose B2B equals N)
 bugotc = _opt("bugotc")          # /bugotcchecker (own file: forwarded day list -> payout % + result, Quantex style)
 mtgshift = _opt("mtgshift")      # /mtgshift (own file: forwarded day list, first candle skipped -> result from the next candle)
 
@@ -139,13 +140,13 @@ LEGEND = ("✅ = টেস্ট পিরিয়ডেও টিকেছে 
 
 
 def _head_cmds_all():
-    return ("/others — অন্যান্য কমান্ড বাটন আকারে (লাইভ, স্ট্যাটাস, ডেটা, চেক, ইঞ্জিন ৩, ৪, ৯, ১০, ১১, ১২, ১৩)\n/engine6 — ইঞ্জিন ৬ (ইঞ্জিন ৩-এর মতো, কিন্তু গ্রিন/রেড আলাদা চার্ট, একদিনের কম B2B লস আগে)\n/engine8 — ইঞ্জিন ৮ (ইঞ্জিন ৬-এর হিসাব, শুধু টেক্সট: গ্রিন/রেডের সর্বনিম্ন B2B লসের মিনিটগুলো)\n/engine14 — ইঞ্জিন ১৪ (ইঞ্জিন ১২-এর দ্রুত স্বাধীন কপি: একই ফলাফল, কম সময়ে)\n/bugotcchecker — বাগ OTC চেকার (ইঞ্জিনের দিনের লিস্ট ফরওয়ার্ড করলে প্রতিটা সিগন্যালের পেআউট % ও রেজাল্ট, কম পেআউটে শুধু পার্সেন্ট)\n/mtgshift — MTG শিফট (লিস্ট ফরওয়ার্ড করলে প্রথম ক্যান্ডেল বাদ, পরের ক্যান্ডেল থেকে ঢুকলে নন-MTG/MTG1 রেজাল্ট)\n/db — ডাটাবেজ সাইজ + কত দিনের ডেটা জমা (রিয়েল ও OTC)\n/otctest — OTC তালিকা পেস্ট করে কোনো দিনের রিপ্লে টেস্ট\n/realtest — রিয়েল তালিকা পেস্ট করে কোনো দিনের রিপ্লে টেস্ট\n/id — আমার Telegram ID")
+    return ("/others — অন্যান্য কমান্ড বাটন আকারে (লাইভ, স্ট্যাটাস, ডেটা, চেক, ইঞ্জিন ৩, ৪, ৯, ১০, ১১, ১২, ১৩)\n/engine6 — ইঞ্জিন ৬ (ইঞ্জিন ৩-এর মতো, কিন্তু গ্রিন/রেড আলাদা চার্ট, একদিনের কম B2B লস আগে)\n/engine8 — ইঞ্জিন ৮ (ইঞ্জিন ৬-এর হিসাব, শুধু টেক্সট: গ্রিন/রেডের সর্বনিম্ন B2B লসের মিনিটগুলো)\n/engine14 — ইঞ্জিন ১৪ (ইঞ্জিন ১২-এর দ্রুত স্বাধীন কপি: একই ফলাফল, কম সময়ে)\n/engine15 — ইঞ্জিন ১৫ (ইঞ্জিন ১৪-এর স্বাধীন কপি, তবে মিনিট বাছাই: যে মিনিটের B2B লস ঠিক N সবগুলো)\n/bugotcchecker — বাগ OTC চেকার (ইঞ্জিনের দিনের লিস্ট ফরওয়ার্ড করলে প্রতিটা সিগন্যালের পেআউট % ও রেজাল্ট, কম পেআউটে শুধু পার্সেন্ট)\n/mtgshift — MTG শিফট (লিস্ট ফরওয়ার্ড করলে প্রথম ক্যান্ডেল বাদ, পরের ক্যান্ডেল থেকে ঢুকলে নন-MTG/MTG1 রেজাল্ট)\n/db — ডাটাবেজ সাইজ + কত দিনের ডেটা জমা (রিয়েল ও OTC)\n/otctest — OTC তালিকা পেস্ট করে কোনো দিনের রিপ্লে টেস্ট\n/realtest — রিয়েল তালিকা পেস্ট করে কোনো দিনের রিপ্লে টেস্ট\n/id — আমার Telegram ID")
 
 
 def head_cmds():
     """Command list for /start, without the lines of engines whose file is not there."""
     mods = {"engine3": engine3, "engine4": engine4, "engine6": engine6, "engine8": engine8, "engine9": engine9,
-            "engine10": radar, "engine11": radar11, "engine12": engine12, "engine13": engine13, "engine14": engine14, "bugotcchecker": bugotc, "mtgshift": mtgshift, "otctest": otctest, "realtest": otctest}
+            "engine10": radar, "engine11": radar11, "engine12": engine12, "engine13": engine13, "engine14": engine14, "engine15": engine15, "bugotcchecker": bugotc, "mtgshift": mtgshift, "otctest": otctest, "realtest": otctest}
     keep = []
     for line in _head_cmds_all().split("\n"):
         m = re.match(r"/(engine\d+|otctest|realtest|bugotcchecker|mtgshift)\b", line)
@@ -2486,7 +2487,7 @@ async def on_others_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     fn = {n: f for n, _lb, f in _others_items()}.get(q.data.split(":", 1)[1])
     if fn is None:
         return
-    for m in (engine12, engine13, engine14, bugotc, mtgshift):      # same as typing a command: forget a pending ✏️ prompt
+    for m in (engine12, engine13, engine14, engine15, bugotc, mtgshift):      # same as typing a command: forget a pending ✏️ prompt
         cw = getattr(m, "_clear_wait", None) if m is not None else None
         if cw:
             await cw(update, ctx)
@@ -2534,6 +2535,8 @@ async def post_init(app):
         cmds += [otctest.COMMAND, otctest.COMMAND_REAL]
     if engine14 is not None:
         cmds.append(engine14.COMMAND)
+    if engine15 is not None:
+        cmds.append(engine15.COMMAND)
     if bugotc is not None:
         cmds.append(bugotc.COMMAND)
     if mtgshift is not None:
@@ -2650,6 +2653,8 @@ def main():
         engine13.register(app, send, allowed, deny, SCAN_LOCK, lambda: APP.bot)      # /engine13 (own command, own handlers)
     if engine14 is not None:
         engine14.register(app, send, allowed, deny, SCAN_LOCK, lambda: APP.bot)      # /engine14 (own command, own handlers)
+    if engine15 is not None:
+        engine15.register(app, send, allowed, deny, SCAN_LOCK, lambda: APP.bot)      # /engine15 (own command, own handlers)
     if bugotc is not None:
         bugotc.register(app, send, allowed, deny, SCAN_LOCK, lambda: APP.bot)        # /bugotcchecker (own command, own handlers)
     if mtgshift is not None:
