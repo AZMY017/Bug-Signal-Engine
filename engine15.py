@@ -2028,9 +2028,11 @@ def register(app, send, allowed, deny, lock, bot_getter):
     D.update(send=send, allowed=allowed, deny=deny, lock=lock, bot=bot_getter)
     app.add_handler(CommandHandler("engine15", cmd_engine15))
     app.add_handler(CallbackQueryHandler(on_cb, pattern=r"^e15:"))
-    app.add_handler(CommandHandler(["engine3", "engine4", "engine6", "engine8", "engine9", "engine10", "engine11", "engine12", "engine13", "otctest", "realtest"], _clear_wait), group=-6)
-    app.add_handler(CallbackQueryHandler(_clear_wait, pattern=r"^(e3|e4|e6|e8|e9|e10|e11|e12|e13|ot|rt):"), group=-6)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text), group=-7)
+    # Own handler groups (-12 / -13): python-telegram-bot runs only ONE handler per group, so sharing -6 / -7 with Engine 14 meant
+    # Engine 14's text handler ran first and Engine 15's on_text never got the typed answer (date / minutes / loss number).
+    app.add_handler(CommandHandler(["engine3", "engine4", "engine6", "engine8", "engine9", "engine10", "engine11", "engine12", "engine13", "engine14", "otctest", "realtest"], _clear_wait), group=-12)
+    app.add_handler(CallbackQueryHandler(_clear_wait, pattern=r"^(e3|e4|e6|e8|e9|e10|e11|e12|e13|e14|ot|rt):"), group=-12)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text), group=-13)
 
 
 COMMAND = BotCommand("engine15", "ইঞ্জিন ১৫: অটো ব্যাক-টেস্ট + রিপ্লে টেস্ট (কপি-পেস্ট ছাড়া)")
