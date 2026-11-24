@@ -3,7 +3,7 @@
 What it replaces by hand: /engine11 (build the 100%-win minute list) -> copy the list -> /otctest (paste it, pick a day, get the replay result).
 
 How it works: you pick settings (time frame, period, MTG, back-to-back losses, minimum signals, pairs) and the TEST DAY(S) (yesterday / today /
-typed dates, max 7). For every test day D the bot
+typed dates, max 30). For every test day D the bot
   1. builds the radar list ONLY from candles before 00:00 of D (same code as /engine11 with 'custom date = D-1'), so D can never leak into its own list;
   2. replays that list on day D with the same code as /otctest (engine4.outcomes: N losses in a row -> next hour's trade is a SIGNAL, doji = win);
   3. sends (optional) the list of each day, (optional) every signal + result like live, the report with win ratio, the loss list and a CSV.
@@ -1249,7 +1249,7 @@ log = logging.getLogger("engine15")
 BDT = pairs.BDT
 OFF = engine3.OFF
 SHOW_SHORT_WARN = False             # Engine 15: no '⚠️ X: N দিনের ডেটা চেয়েছিলে, ডাটাবেজে পেয়েছি ...' lines (set True to bring them back)
-MAX_DAYS = 7                       # most test days in one run
+MAX_DAYS = 30                      # most test days in one run
 E3_MAX_DAYS = 365
 WAIT_SECS = 900                    # a ✏️ prompt that nobody answers expires after 15 minutes
 UP, DOWN = "UP (Call) 📈", "DOWN (Put) 📉"
