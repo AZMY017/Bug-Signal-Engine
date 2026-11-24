@@ -83,7 +83,21 @@ if os.environ.get("WINDOWS", "").strip():
         WINDOWS = engine.WINDOWS_DEFAULT
 
 APP = None
-SCAN_LOCK = asyncio.Lock()
+class _TrackedLock(asyncio.Lock):
+    """Exactly asyncio.Lock, only it remembers which task holds it (so /stop can find what is running)."""
+    holder = None
+
+    async def acquire(self):
+        ok = await super().acquire()
+        self.holder = asyncio.current_task()
+        return ok
+
+    def release(self):
+        self.holder = None
+        super().release()
+
+
+SCAN_LOCK = _TrackedLock()
 SCAN = {"text": "এখনো স্ক্যান চলেনি", "at": 0.0}
 
 
@@ -140,7 +154,7 @@ LEGEND = ("✅ = টেস্ট পিরিয়ডেও টিকেছে 
 
 
 def _head_cmds_all():
-    return ("/others — অন্যান্য কমান্ড বাটন আকারে (লাইভ, স্ট্যাটাস, ডেটা, চেক, ইঞ্জিন ৩, ৪, ৯, ১০, ১১, ১২, ১৩)\n/engine6 — ইঞ্জিন ৬ (ইঞ্জিন ৩-এর মতো, কিন্তু গ্রিন/রেড আলাদা চার্ট, একদিনের কম B2B লস আগে)\n/engine8 — ইঞ্জিন ৮ (ইঞ্জিন ৬-এর হিসাব, শুধু টেক্সট: গ্রিন/রেডের সর্বনিম্ন B2B লসের মিনিটগুলো)\n/engine14 — ইঞ্জিন ১৪ (ইঞ্জিন ১২-এর দ্রুত স্বাধীন কপি: একই ফলাফল, কম সময়ে)\n/engine15 — ইঞ্জিন ১৫ (ইঞ্জিন ১৪-এর স্বাধীন কপি, তবে মিনিট বাছাই: যে মিনিটের B2B লস ঠিক N সবগুলো)\n/bugotcchecker — বাগ OTC চেকার (ইঞ্জিনের দিনের লিস্ট ফরওয়ার্ড করলে প্রতিটা সিগন্যালের পেআউট % ও রেজাল্ট, কম পেআউটে শুধু পার্সেন্ট)\n/mtgshift — MTG শিফট (লিস্ট ফরওয়ার্ড করলে প্রথম ক্যান্ডেল বাদ, পরের ক্যান্ডেল থেকে ঢুকলে নন-MTG/MTG1 রেজাল্ট)\n/db — ডাটাবেজ সাইজ + কত দিনের ডেটা জমা (রিয়েল ও OTC)\n/otctest — OTC তালিকা পেস্ট করে কোনো দিনের রিপ্লে টেস্ট\n/realtest — রিয়েল তালিকা পেস্ট করে কোনো দিনের রিপ্লে টেস্ট\n/id — আমার Telegram ID")
+    return ("/others — অন্যান্য কমান্ড বাটন আকারে (লাইভ, স্ট্যাটাস, ডেটা, চেক, ইঞ্জিন ৩, ৪, ৯, ১০, ১১, ১২, ১৩)\n/engine6 — ইঞ্জিন ৬ (ইঞ্জিন ৩-এর মতো, কিন্তু গ্রিন/রেড আলাদা চার্ট, একদিনের কম B2B লস আগে)\n/engine8 — ইঞ্জিন ৮ (ইঞ্জিন ৬-এর হিসাব, শুধু টেক্সট: গ্রিন/রেডের সর্বনিম্ন B2B লসের মিনিটগুলো)\n/engine14 — ইঞ্জিন ১৪ (ইঞ্জিন ১২-এর দ্রুত স্বাধীন কপি: একই ফলাফল, কম সময়ে)\n/engine15 — ইঞ্জিন ১৫ (ইঞ্জিন ১৪-এর স্বাধীন কপি, তবে মিনিট বাছাই: যে মিনিটের B2B লস ঠিক N সবগুলো)\n/bugotcchecker — বাগ OTC চেকার (ইঞ্জিনের দিনের লিস্ট ফরওয়ার্ড করলে প্রতিটা সিগন্যালের পেআউট % ও রেজাল্ট, কম পেআউটে শুধু পার্সেন্ট)\n/mtgshift — MTG শিফট (লিস্ট ফরওয়ার্ড করলে প্রথম ক্যান্ডেল বাদ, পরের ক্যান্ডেল থেকে ঢুকলে নন-MTG/MTG1 রেজাল্ট)\n/db — ডাটাবেজ সাইজ + কত দিনের ডেটা জমা (রিয়েল ও OTC)\n/otctest — OTC তালিকা পেস্ট করে কোনো দিনের রিপ্লে টেস্ট\n/realtest — রিয়েল তালিকা পেস্ট করে কোনো দিনের রিপ্লে টেস্ট\n/stop — চলতে থাকা সব স্ক্যান/ইঞ্জিন থামিয়ে দেয়\n/id — আমার Telegram ID")
 
 
 def head_cmds():
@@ -2447,12 +2461,66 @@ async def on_e4_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         pass
 
 
+# ---------------------------------------------------------------- /stop  (stops every running scan / engine job)
+STOP_NAMES = {"scan_job": "/scan", "e2_job": "ইঞ্জিন ২", "e3_job": "ইঞ্জিন ৩", "e4_job": "ইঞ্জিন ৪", "e6_job": "ইঞ্জিন ৬", "e8_job": "ইঞ্জিন ৮",
+              "e9_job": "ইঞ্জিন ৯", "e10_job": "ইঞ্জিন ১০", "e11_job": "ইঞ্জিন ১১", "engine12_job": "ইঞ্জিন ১২", "engine13_job": "ইঞ্জিন ১৩",
+              "engine14_job": "ইঞ্জিন ১৪", "engine15_job": "ইঞ্জিন ১৫", "auto_scan_task": "অটো স্ক্যান (নিজে থেকে চলা)",
+              "radar_refresh_task": "ইঞ্জিন ১০ রেডার তালিকার অটো রিফ্রেশ", "radar11_refresh_task": "ইঞ্জিন ১১ রেডার তালিকার অটো রিফ্রেশ"}
+
+
+def _stop_all(bd, lock, me=None):
+    """Cancels every running job task (bot_data keys ending with _job) and whoever holds the scan lock. -> list of names stopped.
+    Live alert / result loops are NOT touched (they are not scans)."""
+    stopped, seen = [], set()
+    for key in list(bd):
+        t = bd[key]
+        if key.endswith("_job") and isinstance(t, asyncio.Task) and not t.done() and t is not me:
+            t.cancel()
+            seen.add(t)
+            stopped.append(STOP_NAMES.get(key, key))
+    h = getattr(lock, "holder", None)
+    if h is not None and not h.done() and h is not me and h not in seen:
+        name = next((STOP_NAMES.get(k, k) for k, v in bd.items() if v is h), None)
+        if name is None:
+            try:
+                name = "অন্য একটা কাজ (%s)" % h.get_coro().__qualname__
+            except Exception:  # noqa
+                name = "অন্য একটা কাজ"
+        h.cancel()
+        stopped.append(name)
+    return stopped
+
+
+async def cmd_stop(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return await deny(update)
+    msg = update.effective_message
+    stopped = _stop_all(ctx.application.bot_data, SCAN_LOCK, asyncio.current_task())
+    for m in (engine12, engine13, engine14, engine15, bugotc, mtgshift):      # also forget any pending ✏️ prompt
+        cw = getattr(m, "_clear_wait", None) if m is not None else None
+        if cw:
+            try:
+                await cw(update, ctx)
+            except Exception:  # noqa
+                pass
+    await asyncio.sleep(0.5)        # let the cancelled jobs release the lock
+    if not stopped:
+        return await msg.reply_text("⏹ কিছুই চলছিল না।" + ("" if not SCAN_LOCK.locked() else "\n⚠️ তবু লক ধরা আছে, ১০ সেকেন্ড পর আবার /stop দাও।"))
+    txt = "⏹ থামিয়েছি:\n" + "\n".join("• " + n for n in stopped)
+    if any("অটো" in n for n in stopped):
+        txt += "\n\nℹ️ অটো কাজটা বন্ধ হয়ে গেল, সার্ভার রিস্টার্ট/ডিপ্লয় হলে আবার নিজে চালু হবে।"
+    txt += "\n\nডাটাবেজ থেকে যেটা এই মুহূর্তে লোড হচ্ছিল সেটা কয়েক সেকেন্ডে নিজে শেষ হবে, কিন্তু কোনো রেজাল্ট আর আসবে না।"
+    if SCAN_LOCK.locked():
+        txt += "\n⚠️ লক এখনো ধরা, ১০ সেকেন্ড পর আবার /stop দাও।"
+    await msg.reply_text(txt)
+
+
 # ---------------------------------------------------------------- /others  (hidden commands as buttons)
 # Commands listed here are NOT in the "/" menu or the /start list any more; /others shows them as buttons.
 # The typed commands (/live, /engine3 ...) still work. To move one more command here: add a line below, then remove its
 # BotCommand from post_init and its line from _head_cmds_all.
 def _others_items():
-    items = [("live", "🔔 লাইভ অ্যালার্ট", cmd_live), ("status", "📊 স্ট্যাটাস", cmd_status), ("data", "🗂 ডেটা কভারেজ", cmd_data),
+    items = [("stop", "⏹ স্টপ (সব বন্ধ)", cmd_stop), ("live", "🔔 লাইভ অ্যালার্ট", cmd_live), ("status", "📊 স্ট্যাটাস", cmd_status), ("data", "🗂 ডেটা কভারেজ", cmd_data),
              ("check", "🔍 স্লট চেক", cmd_check)]
     if engine3 is not None:
         items.append(("engine3", "ইঞ্জিন ৩", cmd_engine3))
@@ -2530,7 +2598,7 @@ async def post_init(app):
         (engine8, BotCommand("engine8", "ইঞ্জিন ৮: সর্বনিম্ন B2B লসের মিনিট টেক্সটে (গ্রিন/রেড)")),
     ]
     cmds = [BotCommand("others", "অন্যান্য: লাইভ, স্ট্যাটাস, ডেটা, চেক, ইঞ্জিন ৩/৪/৯/১০/১১/১২/১৩ বাটনে")] + [c for m, c in _eng_cmds if m is not None] + [BotCommand("db", "ডাটাবেজ: সাইজ, কত দিনের ডেটা (রিয়েল + OTC)"),
-            BotCommand("id", "আমার Telegram ID")]
+            BotCommand("id", "আমার Telegram ID"), BotCommand("stop", "⏹ স্টপ: চলতে থাকা সব স্ক্যান/ইঞ্জিন থামাও")]
     if otctest is not None:
         cmds += [otctest.COMMAND, otctest.COMMAND_REAL]
     if engine14 is not None:
@@ -2627,6 +2695,7 @@ def main():
     if radar11 is not None:
         app.add_handler(CommandHandler("engine11", cmd_engine11))
     app.add_handler(CommandHandler("id", cmd_id))
+    app.add_handler(CommandHandler("stop", cmd_stop, block=False))
     app.add_handler(CommandHandler("others", cmd_others))
     app.add_handler(CallbackQueryHandler(on_others_cb, pattern=r"^oth:"))
     app.add_handler(CallbackQueryHandler(on_live_cb, pattern=r"^lv:"))
