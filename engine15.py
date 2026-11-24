@@ -1452,10 +1452,92 @@ def load_pair(pair, dates, st):
     return source.load_oc(pair, lo_all, hi_all)
 
 
+def _cells(fd, fv, rows, per, S, hours, J, ks):
+    """FAST helper: outcome of every (day-row, minute-slot, hour) cell at once (numpy, no per-minute loop).
+    -> {(side, k): dict(s=stats-out, e=engine4-out, lvl=engine4-level, dj=engine4-doji)}, each array shaped (len(rows), J, len(hours)).
+      s   = Engine 3/6 rule (doji = skipped) -> used to find the minutes whose longest one-day loss run is N
+      e/lvl/dj = Engine 4 rule (doji = win)  -> used to count the signals
+    Same numbers as engine3.minute_stats / engine4.outcomes, only computed for all minutes together."""
+    H = np.asarray(hours)
+    idx = rows[:, None, None] * S + (H[None, None, :] * per + np.arange(J)[None, :, None])
+    e, ev = fd[idx], fv[idx]
+    kmax = max(ks)
+    xs = [(fd[idx + st_], fv[idx + st_]) for st_ in range(1, kmax + 1)]
+    res = {}
+    for side, s in (("G", 1), ("R", -1)):
+        wins = ev & (e == s)                                   # --- stats rule: doji = skipped
+        alive = ev & (e == -s)
+        souts = {}
+        for st_ in range(kmax + 1):
+            if st_:
+                x, xv = xs[st_ - 1]
+                wins = wins | (alive & xv & (x == s))
+                alive = alive & xv & (x == -s)
+            if st_ in ks:
+                o_ = np.zeros(e.shape, np.int8)
+                o_[wins] = 1
+                o_[alive] = -1
+                souts[st_] = o_
+        lvl = np.full(e.shape, -1, np.int8)                    # --- engine4 rule: doji = win
+        lvl[ev & ((e == s) | (e == 0))] = 0
+        dj = ev & (e == 0)
+        al = ev & (e == -s)
+        for st_ in range(kmax + 1):
+            if st_:
+                x, xv = xs[st_ - 1]
+                w = al & xv & ((x == s) | (x == 0))
+                dj = dj | (w & (x == 0))
+                lvl[w] = st_
+                al = al & xv & (x == -s)
+            if st_ in ks:
+                o_ = np.zeros(e.shape, np.int8)
+                o_[lvl >= 0] = 1
+                o_[al] = -1
+                res[(side, st_)] = dict(s=souts[st_], e=o_, lvl=lvl.copy(), dj=dj.copy())
+    return res
+
+
+def _b2b_day(sout):
+    """Longest loss run inside ONE day for every minute slot (same as engine3._fast_streaks' first number). sout: (days, J, hours) -> (J,)."""
+    nd, J, nh = sout.shape
+    dc = np.zeros((nd, J), np.int32)
+    best = np.zeros((nd, J), np.int32)
+    for h in range(nh):
+        v = sout[:, :, h]
+        dc = np.where(v == -1, dc + 1, np.where(v == 1, 0, dc))
+        np.maximum(best, dc, out=best)
+    return best.max(axis=0)
+
+
+def _signals(eout, edj, js, n_loss, atleast):
+    """Signals of the chosen minute slots js (scope 'day': the streak restarts every day), all slots together.
+    -> (sig, win, doji) arrays, one number per slot. Same counting as engine4.find_signals."""
+    E, DJ = eout[:, js, :], edj[:, js, :]
+    nd, ns, nh = E.shape
+    streak = np.zeros((nd, ns), np.int32)
+    sig = np.zeros(ns, np.int64)
+    win = np.zeros(ns, np.int64)
+    doji = np.zeros(ns, np.int64)
+    for h in range(nh):
+        v = E[:, :, h]
+        due = (streak >= n_loss) if atleast else (streak == n_loss)
+        sg = due & (v != 0)
+        wn = sg & (v == 1)
+        sig += sg.sum(0)
+        win += wn.sum(0)
+        doji += (wn & DJ[:, :, h]).sum(0)
+        streak = np.where(v == -1, streak + 1, np.where(v == 1, 0, streak))
+    return sig, win, doji
+
+
 def compute_pair(pair, dates, st, data=None):
     """Reads the pair's M1 candles once. For every test day D: (a) the back-test list is built ONLY from candles before 00:00 of D
     (so the test day can never leak into its own list), exactly like Engine 11 with 'custom date = D-1'; (b) that list is replayed on
-    day D with the same code as /otctest. -> dict(pair, lists{date: dict|None}, sigs, no_data[date], partial[(date, hh:mm)], missing)."""
+    day D with the same code as /otctest. -> dict(pair, lists{date: dict|None}, sigs, no_data[date], partial[(date, hh:mm)], missing).
+
+    FAST VERSION (same results as before, checked number by number): the outcome of every minute / hour / day is worked out ONCE for the
+    whole data (all minutes together, numpy) and every test day only takes its own window out of it. The old way rebuilt everything
+    for every test day and looped minute by minute in Python."""
     tf, n, atleast = st["tf"], st["n"], st["mode"] == "atleast"
     days_n = engine3.period_days(st["months"])
     out = dict(pair=pair, lists={}, sigs=[], no_data=[], partial=[], missing=0)
@@ -1467,36 +1549,81 @@ def compute_pair(pair, dates, st, data=None):
         out["lists"] = {d: None for d in dates}
         return out
     ts, o, c = np.asarray(ts), np.asarray(o), np.asarray(c)
-    day_rules = {}
-    for d in dates:
-        hi = day_ts(d)                                              # candles strictly BEFORE the test day
-        lo = hi - (days_n + 10) * 86400
-        msk = (ts >= lo) & (ts < hi)
-        res = None
-        if msk.any():
-            res = engine9.analyze(pair, ts[msk], o[msk], c[msk], tf, st["months"], sorted(st["mtg"]), n, "day", atleast)
-        if res is None:
-            out["lists"][d] = None
-            day_rules[d] = []
-            continue
-        first_ts = int(ts[msk][0])
-        first_have = int((first_ts + OFF) // 86400) - res["d0"]
-        first_want = int(res["days"][-1]) - days_n + 1
-        short = None
-        if SHOW_SHORT_WARN and first_have - first_want > 3:                             # > 3 days missing (weekend gaps are not counted)
-            short = dict(want=days_n, got=int(res["days"][-1]) - int(res["days"][0]) + 1)
-        rules = rules_from(res, st["minsig"])
-        out["lists"][d] = dict(rules=rules, days=len(res["days"]), short=short,
-                               first=engine3.day_date(res["d0"], res["days"][0]), last=engine3.day_date(res["d0"], res["days"][-1]))
-        day_rules[d] = rules
-    # ---- replay (copy of otctest.replay, one pair)
     lt, dd = engine3.to_tf(ts, o, c, tf)
     if len(lt) == 0:
-        out["no_data"] = [d for d in dates if day_rules.get(d)]
+        out["lists"] = {d: None for d in dates}
         return out
     d0, dirm, val = engine3.build_grid(lt, dd, tf)
     nd = dirm.shape[0]
     hours = engine3.hours_for(pair)
+    S, per = 1440 // tf, 60 // tf
+    J = len(range(0, 60, tf))
+    MK = engine3.MAXK
+    ks = sorted(st["mtg"])
+    fd = np.concatenate((dirm.reshape(-1), np.zeros(MK, np.int8))).astype(np.int8)
+    fv = np.concatenate((val.reshape(-1), np.zeros(MK, bool)))
+    full = _cells(fd, fv, np.arange(nd), per, S, hours, J, ks)      # all days, all minutes, both sides, chosen MTG levels
+    lt_day = lt // 86400
+    day_rules = {}
+    for d in dates:
+        hi_ts = day_ts(d)                                           # candles strictly BEFORE the test day
+        lo_ts = hi_ts - (days_n + 10) * 86400
+        hi_day = (hi_ts + OFF) // 86400
+        lo_day = hi_day - (days_n + 10)
+        m_a, m_b = int(np.searchsorted(ts, lo_ts, "left")), int(np.searchsorted(ts, hi_ts, "left"))
+        a, b = int(np.searchsorted(lt_day, lo_day, "left")), int(np.searchsorted(lt_day, hi_day, "left"))
+        if (m_b - m_a) < 500 or b <= a:
+            out["lists"][d] = None
+            day_rules[d] = []
+            continue
+        d0_w = int(lt_day[a])                                       # first day of this window (like the old per-day grid)
+        r0, r1 = max(lo_day - d0, 0), min(hi_day - d0, nd)
+        days_abs = engine3.pick_days(None, val[r0:r1], tf, st["months"], hours) + r0
+        if len(days_abs) == 0:
+            out["lists"][d] = None
+            day_rules[d] = []
+            continue
+        # the last row of the window must not look into the test day (MTG steps past midnight): recompute only that row
+        r_last = int(lt_day[b - 1]) - d0
+        pos = np.flatnonzero(days_abs == r_last)
+        fix = None
+        if len(pos):
+            fdT = np.concatenate((fd[:(r_last + 1) * S], np.zeros(MK, np.int8)))
+            fvT = np.concatenate((fv[:(r_last + 1) * S], np.zeros(MK, bool)))
+            fix = _cells(fdT, fvT, np.array([r_last]), per, S, hours, J, ks)
+        per_k = {}
+        for k in ks:
+            sides = {}
+            for side in ("G", "R"):
+                so = full[(side, k)]["s"][days_abs]
+                eo = full[(side, k)]["e"][days_abs]
+                dj_ = full[(side, k)]["dj"][days_abs]
+                if fix is not None:
+                    so[pos[0]] = fix[(side, k)]["s"][0]
+                    eo[pos[0]] = fix[(side, k)]["e"][0]
+                    dj_[pos[0]] = fix[(side, k)]["dj"][0]
+                b2b = _b2b_day(so)
+                js = np.flatnonzero(b2b == n)
+                rows = []
+                if len(js):
+                    sg, wn, dj_n = _signals(eo, dj_, js, n, atleast)
+                    for q, j in enumerate(js):
+                        rows.append(dict(minute=int(j) * tf, sig=int(sg[q]), win=int(wn[q]), loss=int(sg[q] - wn[q]), doji=int(dj_n[q]),
+                                         missing=0, signals=[]))
+                sides[side] = dict(lo=(n if rows else None), rows=rows)
+            per_k[k] = sides
+        days_rel = days_abs + d0 - d0_w
+        res = dict(pair=pair, tf=tf, months=st["months"], d0=d0_w, days=days_rel, ks=ks, n_loss=n, scope="day", atleast=atleast, per=per_k)
+        first_have = int((int(ts[m_a]) + OFF) // 86400) - d0_w
+        first_want = int(days_rel[-1]) - days_n + 1
+        short = None
+        if SHOW_SHORT_WARN and first_have - first_want > 3:                             # > 3 days missing (weekend gaps are not counted)
+            short = dict(want=days_n, got=int(days_rel[-1]) - int(days_rel[0]) + 1)
+        rules = rules_from(res, st["minsig"])
+        out["lists"][d] = dict(rules=rules, days=len(days_rel), short=short,
+                               first=engine3.day_date(d0_w, days_rel[0]), last=engine3.day_date(d0_w, days_rel[-1]))
+        day_rules[d] = rules
+    # ---- replay (same rule as /otctest.replay, one pair) - uses the same all-days arrays
     for d in dates:
         rs = day_rules.get(d) or []
         if not rs:
@@ -1505,14 +1632,17 @@ def compute_pair(pair, dates, st, data=None):
         if row < 0 or row >= nd or not val[row].any():
             out["no_data"].append(d)
             continue
-        last_loc = int(lt[(lt // 86400) == (day_ts(d) + OFF) // 86400].max())
+        i_last = int(np.searchsorted(lt_day, (day_ts(d) + OFF) // 86400, "right")) - 1
+        last_loc = int(lt[i_last])
         if last_loc < day_ts(d) + OFF + 23 * 3600:                  # candles end before the 23:00 hour -> day not complete
             out["partial"].append((d, dt.datetime.fromtimestamp(last_loc - OFF, BDT).strftime("%H:%M")))
         for r in rs:
-            res_, lvl, dj = engine4.outcomes(dirm, val, tf, r["minute"], np.array([row]), r["side"], r["mtg"], hours)
+            cell = full[(r["side"], r["mtg"])]
+            jj = r["minute"] // tf
+            res_, lvl, dj = cell["e"][row, jj], cell["lvl"][row, jj], cell["dj"][row, jj]
             streak, loss_h = 0, []
             for j, h in enumerate(hours):
-                v = int(res_[0, j])
+                v = int(res_[j])
                 due = streak >= n if atleast else streak == n
                 if v == 0:
                     if due:
@@ -1520,7 +1650,7 @@ def compute_pair(pair, dates, st, data=None):
                     continue
                 if due:
                     out["sigs"].append(dict(ts=day_ts(d) + h * 3600 + r["minute"] * 60, date=d, pair=pair, side=r["side"], minute=r["minute"],
-                                            hour=h, mtg=r["mtg"], res=v, lvl=int(lvl[0, j]), doji=bool(dj[0, j]), streak=streak,
+                                            hour=h, mtg=r["mtg"], res=v, lvl=int(lvl[j]), doji=bool(dj[j]), streak=streak,
                                             loss_hours=list(loss_h)))
                 if v == -1:
                     streak += 1
